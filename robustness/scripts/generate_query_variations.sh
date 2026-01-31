@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH --job-name=augment_query_variation_text
+#SBATCH --job-name=generate_query_variations
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
@@ -11,17 +11,13 @@
 #SBATCH --output=logs/%x-%j.out
 # Set-up the environment.
 
- 
-conda activate ir
+conda activate pag-robustness
 
 nvidia-smi
 
-
+cd /gpfs/work4/0/prjs1037/dpo-exp/pag-repro
 
 dataset_list=(
-    "nq"
-    "hotpotqa"
-    "fiqa"
     "msmarco"
 )
 
@@ -33,13 +29,12 @@ attack_method_list=(
     "naturality" # All submitted
 )
 
-seed_list=(1999  5  27 2016 2026 ) 
-
+seed_list=(1999 5 27 2016 2026)
 
 for dataset in ${dataset_list[@]}; do
     for seed in ${seed_list[@]}; do
         for attack_method in ${attack_method_list[@]}; do
-            sbatch  scripts/augment_query_variation_text_sub.sh ${dataset} ${attack_method} ${seed}
+            sbatch robustness/scripts/generate_query_variations_sub.sh ${dataset} ${attack_method} ${seed}
         done
     done
 done

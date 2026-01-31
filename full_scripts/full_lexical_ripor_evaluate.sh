@@ -1,12 +1,11 @@
-
 #!/bin/bash
 #SBATCH --job-name=pag_infer
 #SBATCH --partition=gpu_h100
 #SBATCH --gres=gpu:1
 #SBATCH --time=4:00:00
-#SBATCH --output=experiments/%x-%j_RQ2.out
-#SBATCH --error=experiments/%x-%j_RQ2.err
-#SBATCH --chdir=/gpfs/work4/0/prjs1037/dpo-exp/PAG
+#SBATCH --output=experiments/%x-%j_RQ1.out
+#SBATCH --error=experiments/%x-%j_RQ1.err
+#SBATCH --chdir=/gpfs/work4/0/prjs1037/dpo-exp/pag-repro/
 
 mkdir -p experiments
 
@@ -32,8 +31,8 @@ conda activate pag-env
 # If no task is set, the script will exit with "Unknown task".
 # -----------------------------------------------------------------------------
 
-task=""
-# task=lexical_constrained_retrieve_and_rerank
+# task=""
+task=lexical_constrained_retrieve_and_rerank
 experiment_dir=experiments-full-lexical-ripor
 
 # datasets for evaluation

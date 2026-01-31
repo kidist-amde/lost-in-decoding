@@ -17,9 +17,8 @@ from beir.retrieval.search.dense import DenseRetrievalExactSearch
 from beir.reranking.models import CrossEncoder
 from beir.reranking import Rerank
 
-import utils.dist_utils as dist_utils
-import utils.normalize_text
-from utils.utils import to_numpy
+from robustness.utils import dist_utils, normalize_text
+from robustness.utils.utils import to_numpy
 
 class DenseEncoderModel:
     def __init__(

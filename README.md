@@ -1,5 +1,5 @@
 [![SIGIR 2026](https://img.shields.io/badge/SIGIR-2026-blue)](#)
-[![Submission](https://img.shields.io/badge/submission-%23706-informational)](#)
+[![Submission](https://img.shields.io/badge/submission-%23XXX-informational)](#)
 [![License](https://img.shields.io/badge/license-Apache%202.0-lightgrey)](LICENSE)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97-Hugging%20Face-yellow)](#)
 
@@ -73,18 +73,24 @@ PAG/
 │   ├── utils/                     # Utilities (metrics, prefix trie, etc.)
 │   └── full_preprocess/           # Data preprocessing scripts
 ├── robustness/                    # Stress-test extensions (RQ2 & RQ3)
-│   ├── attack/                    # Query perturbation modules
-│   │   └── Penha_query_variation_generation/
+│   ├── query_variations/          # Query-variation generation + loaders
+│   │   ├── generate_penha.py      # Main Penha-style variation generator
+│   │   └── penha/
 │   │       ├── transformations_mispelling.py    # Typo generation (QWERTY, char swap, etc.)
 │   │       ├── transformations_paraphrase.py    # Paraphrase (T5, back-translation)
 │   │       ├── transformations_synonym.py       # Synonym replacement (WordNet, embeddings)
 │   │       ├── transformations_ordering.py      # Word order shuffling
 │   │       └── transformations_naturality.py    # Stop word removal, summarization
-│   ├── attack_queries_penha.py    # Main query variation generation script
+│   ├── evaluation/               # Robustness evaluation entry points
+│   │   ├── rq2.py                 # RQ2 pipeline
+│   │   └── attack_eval.py         # Attack evaluation on dense retrieval
+│   ├── metrics/                   # Robustness metrics
+│   │   └── plan_collapse.py       # Plan-collapse metrics
 │   ├── scripts/                   # SLURM evaluation scripts
 │   │   ├── eval.sh                # Standard BEIR evaluation
-│   │   ├── eval_attack_query.sh   # Evaluation on perturbed queries
-│   │   └── augment_query_variation_text.sh  # Batch query variation generation
+│   │   ├── evaluate_attack_queries.sh   # Evaluation on perturbed queries
+│   │   ├── generate_query_variations.sh  # Batch query variation generation
+│   │   └── run_rq2_pipeline.sh    # RQ2 robustness pipeline
 │   └── utils/                     # Evaluation utilities
 │       ├── beir_custom_metrics.py       # MRR, Recall_cap, Hole@k, Accuracy@k
 │       ├── beir_custom_evaluation.py    # Full evaluation pipeline with oracle NDCG
@@ -92,8 +98,7 @@ PAG/
 │       ├── load_data.py                 # BEIR dataset loading
 │       └── load_model.py               # Model loading (Contriever, BGE-M3, etc.)
 ├── full_scripts/                  # Shell scripts for PAG training/evaluation
-├── data/                          # Datasets and checkpoints
-├── follow_the_steps.md            # Step-by-step training pipeline guide
+├── data/                          # Datasets and checkpoints/
 └── requirements.txt               # Python dependencies
 ```
 
@@ -265,19 +270,19 @@ Five perturbation types are supported:
 
 1. **Generate query variations:**
    ```bash
-   bash robustness/scripts/augment_query_variation_text.sh
+   bash robustness/scripts/generate_query_variations.sh
    ```
    Query variations are saved to `output_attack/attacked_text/query/`. To generate a single perturbation type:
    ```bash
-   python robustness/attack_queries_penha.py \
+   python -m robustness.query_variations.generate_penha \
        --attack_method mispelling \
-       --dataset_name msmarco \
-       --word_change_ratio 0.2
+       --dataset msmarco \
+       --split test
    ```
 
 2. **Evaluate on perturbed queries:**
    ```bash
-   bash robustness/scripts/eval_attack_query.sh
+   bash robustness/scripts/evaluate_attack_queries.sh
    ```
    Evaluation runs across multiple random seeds (1999, 5, 27, 2016, 2026) for statistical robustness.
 

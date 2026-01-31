@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH --job-name=eval_attack_query_sub
+#SBATCH --job-name=evaluate_attack_queries_sub
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
@@ -12,16 +12,20 @@
 # Set-up the environment.
 
 # Activate conda
- 
-conda activate ir
+
+conda activate pag-robustness
 
 nvidia-smi
 
- 
+cd /gpfs/work4/0/prjs1037/dpo-exp/pag-repro
 
 dataset=$1
 model=$2
 attack_method=$3
 seed=$4
 
-python eval_attack.py --dataset $dataset --model_name $model  --attack_method $attack_method --seed $seed
+python -m robustness.evaluation.attack_eval \
+  --dataset $dataset \
+  --model_name $model \
+  --attack_method $attack_method \
+  --seed $seed

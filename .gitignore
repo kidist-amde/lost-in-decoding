@@ -30,7 +30,16 @@ MANIFEST
 root/
 data/
 follow_the_steps.md
-
+experiments/
+logs/
+results/
+reports/
+figures/
+*.tar.gz
+*.zip
+*.tar.bz2
+*.rar
+*.7z
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
