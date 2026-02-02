@@ -42,8 +42,12 @@ def candidate_overlap(
     """
     Per-query candidate-set overlap between clean and perturbed lexical runs.
 
-    Returns {qid: {"jaccard": float, "intersection_size": int,
+    Returns {qid: {"jaccard": float, "overlap_at_n": float,
+                    "intersection_size": int,
                     "clean_size": int, "perturbed_size": int}}.
+
+    ``jaccard`` is the standard Jaccard: |C∩C̃| / |C∪C̃|.
+    ``overlap_at_n`` is the alternative overlap: |C∩C̃| / n.
     """
     results = {}
     common_qids = set(clean_run.keys()) & set(perturbed_run.keys())
@@ -58,9 +62,11 @@ def candidate_overlap(
         inter = clean_docs & perturbed_docs
         union = clean_docs | perturbed_docs
         jaccard = len(inter) / len(union) if union else 1.0
+        overlap_at_n = len(inter) / topk if topk > 0 else 0.0
 
         results[qid] = {
             "jaccard": jaccard,
+            "overlap_at_n": overlap_at_n,
             "intersection_size": len(inter),
             "clean_size": len(clean_docs),
             "perturbed_size": len(perturbed_docs),
@@ -84,9 +90,20 @@ def candidate_size_ratio(
     return ratios
 
 
+def _extract_token_ids(token_data) -> List[int]:
+    """Extract token ID list from either new or legacy format.
+
+    New format: ``{"token_ids": [...], "scores": [...]}``
+    Legacy format: ``[int, ...]``
+    """
+    if isinstance(token_data, dict) and "token_ids" in token_data:
+        return token_data["token_ids"]
+    return token_data
+
+
 def plan_intersect(
-    clean_tokens: Dict[str, List[int]],
-    perturbed_tokens: Dict[str, List[int]],
+    clean_tokens: Dict,
+    perturbed_tokens: Dict,
     topk: int = 100,
 ) -> Dict[str, Dict[str, float]]:
     """
@@ -98,28 +115,34 @@ def plan_intersect(
 
     Parameters
     ----------
-    clean_tokens : {qid: [token_id, ...]}
+    clean_tokens : {qid: [token_id, ...]} or {qid: {"token_ids": [...], "scores": [...]}}
         Top-K planner token IDs for clean queries (sorted by descending score).
-    perturbed_tokens : {qid: [token_id, ...]}
+    perturbed_tokens : {qid: [token_id, ...]} or {qid: {"token_ids": [...], "scores": [...]}}
         Top-K planner token IDs for perturbed queries.
 
     Returns
     -------
-    {qid: {"jaccard": float, "intersection_size": int,
+    {qid: {"jaccard": float, "overlap_at_ell": float,
+            "intersection_size": int,
             "clean_size": int, "perturbed_size": int}}
+
+    ``jaccard`` is the standard Jaccard: |P∩Q̃| / |P∪Q̃|.
+    ``overlap_at_ell`` is the alternative overlap: |P∩Q̃| / ℓ.
     """
     results = {}
     common_qids = set(clean_tokens.keys()) & set(perturbed_tokens.keys())
 
     for qid in common_qids:
-        clean_set = set(clean_tokens[qid][:topk])
-        perturbed_set = set(perturbed_tokens[qid][:topk])
+        clean_set = set(_extract_token_ids(clean_tokens[qid])[:topk])
+        perturbed_set = set(_extract_token_ids(perturbed_tokens[qid])[:topk])
         inter = clean_set & perturbed_set
         union = clean_set | perturbed_set
         jaccard = len(inter) / len(union) if union else 1.0
+        overlap_at_ell = len(inter) / topk if topk > 0 else 0.0
 
         results[qid] = {
             "jaccard": jaccard,
+            "overlap_at_ell": overlap_at_ell,
             "intersection_size": len(inter),
             "clean_size": len(clean_set),
             "perturbed_size": len(perturbed_set),
@@ -195,25 +218,37 @@ def aggregate_plan_collapse(
     """
     Compute aggregate plan-collapse statistics.
 
-    Returns a dict with:
-      - avg_jaccard@{topk}          (CandOverlap@K)
-      - avg_size_ratio
-      - avg_rank_correlation@{topk}
-      - avg_plan_intersect@{topk}   (PlanIntersect@K, if tokens provided)
-      - n_queries
+    Returns a dict with distributional stats (mean, median, p10/p25/p75/p90)
+    for each stability metric, plus backward-compatible ``avg_*`` keys.
+
+    Keys include:
+      - CandOverlap@{topk}_mean/median/p10/p25/p75/p90
+      - CandOverlapAtN@{topk}_mean/...       (|C∩C̃| / n)
+      - TokJaccard@{topk}_mean/...           (if tokens provided)
+      - TokOverlapAtEll@{topk}_mean/...      (|P∩P̃| / ℓ, if tokens provided)
+      - avg_jaccard@{topk}                   (backward compat = CandOverlap mean)
+      - avg_plan_intersect@{topk}            (backward compat = TokJaccard mean)
+      - avg_size_ratio, avg_rank_correlation@{topk}, n_queries
     """
     overlap = candidate_overlap(clean_lex_run, perturbed_lex_run, topk)
     size_ratio = candidate_size_ratio(clean_lex_run, perturbed_lex_run)
 
     n = len(overlap)
-    stats = {
-        f"avg_jaccard@{topk}": _safe_mean([v["jaccard"] for v in overlap.values()]),
-        f"avg_intersection@{topk}": _safe_mean(
-            [v["intersection_size"] for v in overlap.values()]
-        ),
-        "avg_size_ratio": _safe_mean(list(size_ratio.values())),
-        "n_queries": n,
-    }
+    jaccard_vals = [v["jaccard"] for v in overlap.values()]
+    overlap_at_n_vals = [v["overlap_at_n"] for v in overlap.values()]
+
+    stats: Dict[str, float] = {"n_queries": n}
+
+    # CandOverlap distributional stats
+    stats.update(_distribution_stats(jaccard_vals, f"CandOverlap@{topk}"))
+    stats.update(_distribution_stats(overlap_at_n_vals, f"CandOverlapAtN@{topk}"))
+
+    # Backward-compatible keys
+    stats[f"avg_jaccard@{topk}"] = stats[f"CandOverlap@{topk}_mean"]
+    stats[f"avg_intersection@{topk}"] = _safe_mean(
+        [v["intersection_size"] for v in overlap.values()]
+    )
+    stats["avg_size_ratio"] = _safe_mean(list(size_ratio.values()))
 
     # Optional: rank correlation (scipy may not be available)
     try:
@@ -222,12 +257,15 @@ def aggregate_plan_collapse(
     except ImportError:
         stats[f"avg_rank_correlation@{topk}"] = None
 
-    # PlanIntersect: token-level plan overlap
+    # TokJaccard: token-level plan overlap distributional stats
     if clean_planner_tokens and perturbed_planner_tokens:
         pi = plan_intersect(clean_planner_tokens, perturbed_planner_tokens, topk)
-        stats[f"avg_plan_intersect@{topk}"] = _safe_mean(
-            [v["jaccard"] for v in pi.values()]
-        )
+        tok_jaccard_vals = [v["jaccard"] for v in pi.values()]
+        tok_overlap_vals = [v["overlap_at_ell"] for v in pi.values()]
+        stats.update(_distribution_stats(tok_jaccard_vals, f"TokJaccard@{topk}"))
+        stats.update(_distribution_stats(tok_overlap_vals, f"TokOverlapAtEll@{topk}"))
+        # Backward compat
+        stats[f"avg_plan_intersect@{topk}"] = stats[f"TokJaccard@{topk}_mean"]
     else:
         stats[f"avg_plan_intersect@{topk}"] = None
 
@@ -273,6 +311,174 @@ def compute_retrieval_metrics(
     }
 
 
+def compute_retrieval_metrics_per_query(
+    run: Dict[str, Dict[str, float]],
+    qrels: Dict[str, Dict[str, int]],
+    k: int = 10,
+) -> Dict[str, Dict[str, float]]:
+    """
+    Per-query NDCG@k and MRR@k using pytrec_eval.
+
+    Returns {qid: {"NDCG@k": float, "MRR@k": float}}.
+    """
+    import pytrec_eval
+
+    filtered_run = {qid: docs for qid, docs in run.items() if qid in qrels}
+
+    str_run = {}
+    for qid, docs in filtered_run.items():
+        str_run[str(qid)] = {str(did): float(s) for did, s in docs.items()}
+
+    str_qrels = {}
+    for qid, docs in qrels.items():
+        str_qrels[str(qid)] = {str(did): int(s) for did, s in docs.items()}
+
+    evaluator = pytrec_eval.RelevanceEvaluator(str_qrels, {f"ndcg_cut_{k}", "recip_rank"})
+    results = evaluator.evaluate(str_run)
+
+    per_query = {}
+    for qid, vals in results.items():
+        per_query[qid] = {
+            f"NDCG@{k}": vals[f"ndcg_cut_{k}"],
+            f"MRR@{k}": vals["recip_rank"],
+        }
+    return per_query
+
+
+# ---------------------------------------------------------------------------
+# Plan collapse classification
+# ---------------------------------------------------------------------------
+
+def classify_plan_collapse(
+    cand_overlap_per_query: Dict[str, Dict[str, float]],
+    tok_jaccard_per_query: Optional[Dict[str, Dict[str, float]]],
+    clean_lex_pq: Dict[str, Dict[str, float]],
+    pert_lex_pq: Dict[str, Dict[str, float]],
+    metric_name: str = "NDCG@10",
+    tau: Optional[float] = None,
+    delta: float = 0.05,
+    tau_percentile: float = 10.0,
+) -> Dict[str, object]:
+    """
+    Classify per-query plan-collapse tail events.
+
+    A query is *collapsed* when:
+        (CandOverlap@n < τ  OR  TokJaccard@ℓ < τ)
+        AND  ΔM_SimulOnly(q, q̃) ≤ -δ
+
+    where ΔM_SimulOnly = M(q̃) - M(q).
+
+    Parameters
+    ----------
+    cand_overlap_per_query : per-query output of ``candidate_overlap()``.
+    tok_jaccard_per_query  : per-query output of ``plan_intersect()`` (may be None).
+    clean_lex_pq : per-query metrics for clean lexical run (from
+                   ``compute_retrieval_metrics_per_query``).
+    pert_lex_pq  : per-query metrics for perturbed lexical run.
+    metric_name  : which metric to use for the performance-drop test
+                   (``"NDCG@10"`` or ``"MRR@10"``).
+    tau          : explicit threshold for overlap / Jaccard.  If ``None``
+                   (default), τ is set to the ``tau_percentile``-th percentile
+                   of the observed CandOverlap distribution.
+    delta        : absolute-drop threshold (positive).  Collapse requires
+                   ΔM ≤ -delta.
+    tau_percentile : percentile used to derive τ when ``tau is None``.
+
+    Returns
+    -------
+    dict with:
+      - ``"collapsed"``     : {qid: bool}
+      - ``"tau"``           : float (threshold used)
+      - ``"delta"``         : float
+      - ``"n_collapsed"``   : int
+      - ``"collapse_rate"`` : float (n_collapsed / n_queries)
+      - ``"n_queries"``     : int
+    """
+    common_qids = sorted(
+        set(cand_overlap_per_query) & set(clean_lex_pq) & set(pert_lex_pq)
+    )
+
+    # Derive τ from the CandOverlap distribution if not given
+    if tau is None:
+        cand_jaccards = [cand_overlap_per_query[q]["jaccard"] for q in common_qids]
+        tau = float(np.percentile(cand_jaccards, tau_percentile)) if cand_jaccards else 0.0
+
+    collapsed: Dict[str, bool] = {}
+    for qid in common_qids:
+        cand_below = cand_overlap_per_query[qid]["jaccard"] < tau
+        tok_below = False
+        if tok_jaccard_per_query and qid in tok_jaccard_per_query:
+            tok_below = tok_jaccard_per_query[qid]["jaccard"] < tau
+
+        overlap_trigger = cand_below or tok_below
+
+        clean_m = clean_lex_pq.get(qid, {}).get(metric_name, 0.0)
+        pert_m = pert_lex_pq.get(qid, {}).get(metric_name, 0.0)
+        delta_m = pert_m - clean_m  # ΔM_SimulOnly = M(q̃) - M(q)
+
+        collapsed[qid] = overlap_trigger and (delta_m <= -delta)
+
+    n_collapsed = sum(collapsed.values())
+    return {
+        "collapsed": collapsed,
+        "tau": tau,
+        "delta": delta,
+        "n_collapsed": n_collapsed,
+        "collapse_rate": n_collapsed / len(common_qids) if common_qids else 0.0,
+        "n_queries": len(common_qids),
+    }
+
+
+def plan_collapse_sensitivity(
+    cand_overlap_per_query: Dict[str, Dict[str, float]],
+    tok_jaccard_per_query: Optional[Dict[str, Dict[str, float]]],
+    clean_lex_pq: Dict[str, Dict[str, float]],
+    pert_lex_pq: Dict[str, Dict[str, float]],
+    metric_name: str = "NDCG@10",
+    tau_percentiles: Optional[List[float]] = None,
+    deltas: Optional[List[float]] = None,
+) -> List[Dict[str, float]]:
+    """
+    Sensitivity ablation: sweep over (τ_percentile, δ) and report collapse rates.
+
+    Returns a list of dicts, one per (τ_percentile, δ) pair, each containing:
+      ``tau_percentile``, ``tau``, ``delta``, ``n_collapsed``, ``collapse_rate``,
+      ``n_queries``.
+    """
+    if tau_percentiles is None:
+        tau_percentiles = [5.0, 10.0, 15.0, 20.0, 25.0]
+    if deltas is None:
+        deltas = [0.01, 0.03, 0.05, 0.10]
+
+    common_qids = sorted(
+        set(cand_overlap_per_query) & set(clean_lex_pq) & set(pert_lex_pq)
+    )
+    cand_jaccards = [cand_overlap_per_query[q]["jaccard"] for q in common_qids]
+
+    rows = []
+    for tp in tau_percentiles:
+        tau = float(np.percentile(cand_jaccards, tp)) if cand_jaccards else 0.0
+        for d in deltas:
+            info = classify_plan_collapse(
+                cand_overlap_per_query=cand_overlap_per_query,
+                tok_jaccard_per_query=tok_jaccard_per_query,
+                clean_lex_pq=clean_lex_pq,
+                pert_lex_pq=pert_lex_pq,
+                metric_name=metric_name,
+                tau=tau,
+                delta=d,
+            )
+            rows.append({
+                "tau_percentile": tp,
+                "tau": info["tau"],
+                "delta": d,
+                "n_collapsed": info["n_collapsed"],
+                "collapse_rate": info["collapse_rate"],
+                "n_queries": info["n_queries"],
+            })
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -289,3 +495,29 @@ def _safe_mean(values: List[float]) -> float:
     """Mean that handles empty lists and NaN values."""
     valid = [v for v in values if v is not None and not (isinstance(v, float) and np.isnan(v))]
     return float(np.mean(valid)) if valid else 0.0
+
+
+def _distribution_stats(values: List[float], prefix: str) -> Dict[str, float]:
+    """Return mean, median, and tail quantiles (p10, p25, p75, p90) for *values*.
+
+    Keys are named ``{prefix}_mean``, ``{prefix}_median``, ``{prefix}_p10``, etc.
+    """
+    valid = [v for v in values if v is not None and not (isinstance(v, float) and np.isnan(v))]
+    if not valid:
+        return {
+            f"{prefix}_mean": 0.0,
+            f"{prefix}_median": 0.0,
+            f"{prefix}_p10": 0.0,
+            f"{prefix}_p25": 0.0,
+            f"{prefix}_p75": 0.0,
+            f"{prefix}_p90": 0.0,
+        }
+    arr = np.asarray(valid, dtype=float)
+    return {
+        f"{prefix}_mean": float(np.mean(arr)),
+        f"{prefix}_median": float(np.median(arr)),
+        f"{prefix}_p10": float(np.percentile(arr, 10)),
+        f"{prefix}_p25": float(np.percentile(arr, 25)),
+        f"{prefix}_p75": float(np.percentile(arr, 75)),
+        f"{prefix}_p90": float(np.percentile(arr, 90)),
+    }

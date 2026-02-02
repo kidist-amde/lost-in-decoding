@@ -61,7 +61,10 @@ from robustness.utils.pag_inference import (
 from robustness.metrics.plan_collapse import (
     aggregate_plan_collapse,
     candidate_overlap,
+    classify_plan_collapse,
     compute_retrieval_metrics,
+    compute_retrieval_metrics_per_query,
+    plan_collapse_sensitivity,
     plan_intersect,
     recovery_delta,
 )
@@ -271,12 +274,96 @@ def evaluate_single(
             # Per-query plan collapse for detailed analysis
             per_query = candidate_overlap(clean_lex_run, pert_lex_run, topk=100)
 
-            # Add per-query PlanIntersect if tokens available
+            # Per-query TokJaccard + overlap_at_ell if tokens available
+            pi_per_query = None
             if clean_tokens and pert_tokens:
                 pi_per_query = plan_intersect(clean_tokens, pert_tokens, topk=100)
                 for qid in per_query:
                     if qid in pi_per_query:
                         per_query[qid]["plan_intersect"] = pi_per_query[qid]["jaccard"]
+                        per_query[qid]["tok_overlap_at_ell"] = pi_per_query[qid]["overlap_at_ell"]
+
+            # Per-query SimulOnly metrics for ΔM and plan collapse classification
+            clean_lex_pq = compute_retrieval_metrics_per_query(clean_lex_run, qrels, k=10)
+            pert_lex_pq = compute_retrieval_metrics_per_query(pert_lex_run, qrels, k=10)
+
+            # Enrich per_query with ΔM_SimulOnly, SeqGain, PlanSwapDrop
+            clean_smt_pq = None
+            if clean_smt_run:
+                clean_smt_pq = compute_retrieval_metrics_per_query(clean_smt_run, qrels, k=10)
+            pert_smt_pq = None
+            if pert_smt_run:
+                pert_smt_pq = compute_retrieval_metrics_per_query(pert_smt_run, qrels, k=10)
+            swap_smt_pq = None
+            swap_smt_run_tmp = load_sequential_run(swap_smt_dir, dataset_name)
+            if swap_smt_run_tmp:
+                swap_smt_pq = compute_retrieval_metrics_per_query(swap_smt_run_tmp, qrels, k=10)
+
+            # Save per-query retrieval metrics for all conditions
+            pq_metrics_dir = os.path.join(pert_output, "per_query_metrics")
+            os.makedirs(pq_metrics_dir, exist_ok=True)
+            for label, pq_data in [
+                ("clean_lex", clean_lex_pq),
+                ("pert_lex", pert_lex_pq),
+                ("clean_smt", clean_smt_pq),
+                ("pert_smt", pert_smt_pq),
+                ("swap_smt", swap_smt_pq),
+            ]:
+                if pq_data:
+                    pq_path = os.path.join(pq_metrics_dir, f"{label}_per_query.json")
+                    with open(pq_path, "w") as f:
+                        json.dump(pq_data, f, indent=2)
+            print(f"[RQ2] Saved per-query retrieval metrics to {pq_metrics_dir}")
+
+            for qid in per_query:
+                for m in ["NDCG@10", "MRR@10"]:
+                    c_val = clean_lex_pq.get(qid, {}).get(m)
+                    p_val = pert_lex_pq.get(qid, {}).get(m)
+                    if c_val is not None and p_val is not None:
+                        per_query[qid][f"delta_lex_{m}"] = p_val - c_val
+                    if pert_smt_pq and p_val is not None:
+                        s_val = pert_smt_pq.get(qid, {}).get(m)
+                        if s_val is not None:
+                            per_query[qid][f"SeqGain_{m}"] = s_val - p_val
+                    if pert_smt_pq and swap_smt_pq:
+                        n_val = pert_smt_pq.get(qid, {}).get(m)
+                        sw_val = swap_smt_pq.get(qid, {}).get(m)
+                        if n_val is not None and sw_val is not None:
+                            per_query[qid][f"PlanSwapDrop_{m}"] = n_val - sw_val
+
+            # Plan collapse classification (default: τ from 10th percentile, δ=0.05)
+            primary_metric = "NDCG@10" if split in ("dl19", "dl20") else "MRR@10"
+            collapse_info = classify_plan_collapse(
+                cand_overlap_per_query=per_query,
+                tok_jaccard_per_query=pi_per_query,
+                clean_lex_pq=clean_lex_pq,
+                pert_lex_pq=pert_lex_pq,
+                metric_name=primary_metric,
+                tau=None,  # derive from 10th percentile
+                delta=0.05,
+                tau_percentile=10.0,
+            )
+            result["plan_collapse"]["collapse_rate"] = collapse_info["collapse_rate"]
+            result["plan_collapse"]["n_collapsed"] = collapse_info["n_collapsed"]
+            result["plan_collapse"]["tau"] = collapse_info["tau"]
+            result["plan_collapse"]["delta"] = collapse_info["delta"]
+
+            # Mark per-query collapsed flag
+            for qid in per_query:
+                per_query[qid]["collapsed"] = collapse_info["collapsed"].get(qid, False)
+
+            # Sensitivity ablation over (τ_percentile, δ)
+            sensitivity = plan_collapse_sensitivity(
+                cand_overlap_per_query=per_query,
+                tok_jaccard_per_query=pi_per_query,
+                clean_lex_pq=clean_lex_pq,
+                pert_lex_pq=pert_lex_pq,
+                metric_name=primary_metric,
+            )
+            sens_path = os.path.join(pert_output, "plan_collapse_sensitivity.json")
+            with open(sens_path, "w") as f:
+                json.dump(sensitivity, f, indent=2)
+            print(f"[RQ2] Wrote {sens_path}")
 
             pq_path = os.path.join(pert_output, "plan_collapse_per_query.json")
             os.makedirs(os.path.dirname(pq_path), exist_ok=True)
@@ -388,10 +475,27 @@ def write_summary(results: List[Dict], output_dir: str):
 
         # Plan collapse (Table 2)
         pc = r.get("plan_collapse", {})
+        # Backward-compatible mean columns
         row["CandOverlap@100"] = pc.get("avg_jaccard@100")
         row["PlanIntersect@100"] = pc.get("avg_plan_intersect@100")
         row["avg_rank_correlation@100"] = pc.get("avg_rank_correlation@100")
         row["avg_size_ratio"] = pc.get("avg_size_ratio")
+
+        # Distributional stats for CandOverlap
+        for stat in ["mean", "median", "p10", "p25", "p75", "p90"]:
+            row[f"CandOverlap@100_{stat}"] = pc.get(f"CandOverlap@100_{stat}")
+            row[f"CandOverlapAtN@100_{stat}"] = pc.get(f"CandOverlapAtN@100_{stat}")
+
+        # Distributional stats for TokJaccard and TokOverlapAtEll
+        for stat in ["mean", "median", "p10", "p25", "p75", "p90"]:
+            row[f"TokJaccard@100_{stat}"] = pc.get(f"TokJaccard@100_{stat}")
+            row[f"TokOverlapAtEll@100_{stat}"] = pc.get(f"TokOverlapAtEll@100_{stat}")
+
+        # Plan collapse classification
+        row["collapse_rate"] = pc.get("collapse_rate")
+        row["n_collapsed"] = pc.get("n_collapsed")
+        row["collapse_tau"] = pc.get("tau")
+        row["collapse_delta"] = pc.get("delta")
 
         # SeqGain (Table 2)
         sg = r.get("seq_gain", {})

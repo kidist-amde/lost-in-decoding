@@ -20,10 +20,11 @@ This package evaluates PAG (Planning Ahead in Generative Retrieval) and dense re
    - [Evaluate-Only Mode (Skip Inference)](#evaluate-only-mode)
    - [Result Consolidation](#result-consolidation)
    - [Output Structure](#output-structure)
-5. [Query Variation Generation](#query-variation-generation)
-6. [Dense Retrieval Attack Evaluation (RQ3)](#dense-retrieval-attack-evaluation)
-7. [Configuration Reference](#configuration-reference)
-8. [Troubleshooting](#troubleshooting)
+5. [Running All 5 Seeds and Reporting Mean ± Std (Example: DL19)](#running-all-5-seeds-and-reporting-mean--std-example-dl19)
+6. [Query Variation Generation](#query-variation-generation)
+7. [Dense Retrieval Attack Evaluation (RQ3)](#dense-retrieval-attack-evaluation)
+8. [Configuration Reference](#configuration-reference)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -426,6 +427,93 @@ avg_rank_correlation@100, avg_size_ratio,
 SeqGain_MRR@10, SeqGain_NDCG@10,
 PlanSwapDrop_MRR@10, PlanSwapDrop_NDCG@10
 ```
+
+---
+
+## Running All 5 Seeds and Reporting Mean ± Std (Example: DL19)
+
+To produce paper-ready results with variance estimates, run all 5 seeds for a given (split, attack) pair and then aggregate.
+
+### Step 1: Run All 5 Seeds
+
+**Option A — Single process (sequential, no SLURM):**
+
+```bash
+conda activate pag-env
+cd /gpfs/work4/0/prjs1037/dpo-exp/pag-repro
+
+# All 5 seeds for DL19 + misspelling (seeds: 1999, 5, 27, 2016, 2026)
+python -m robustness.evaluation.rq2 \
+    --split dl19 \
+    --attack_method mispelling \
+    --seed all \
+    --n_gpu 1 \
+    --batch_size 8
+```
+
+The `--seed all` flag loops over all 5 seeds sequentially. Each seed's results are appended to `experiments/RQ2_robustness/summary.csv`.
+
+**Option B — SLURM (parallel, one job per seed):**
+
+```bash
+# Submits 5 jobs (one per seed) for DL19 + misspelling
+bash robustness/scripts/run_rq2_pipeline.sh dl19 mispelling
+```
+
+To run all 5 attack methods × 5 seeds = 25 jobs:
+
+```bash
+bash robustness/scripts/run_rq2_pipeline.sh dl19
+```
+
+### Step 2: Aggregate Over Seeds (Mean ± Std)
+
+After all seeds complete, aggregate the per-seed rows into mean ± std tables:
+
+```bash
+# Single attack method
+python -m robustness.evaluation.aggregate_results \
+    --splits dl19 \
+    --attacks mispelling \
+    --latex
+
+# All 5 attack methods
+python -m robustness.evaluation.aggregate_results \
+    --splits dl19 \
+    --attacks mispelling ordering synonym paraphrase naturality \
+    --latex
+```
+
+This reads `experiments/RQ2_robustness/summary.csv`, groups rows by (split, attack_method), and computes sample mean and standard deviation over the 5 seeds. It prints three tables:
+
+- **Table 1**: Retrieval performance (S1-NDCG@10, S1-MRR@10, S2-NDCG@10, S2-MRR@10) with deltas, formatted as `mean±std`
+- **Table 2**: Plan stability (CandOverlap@100, PlanIntersect@100, SeqGain, PlanSwapDrop, collapse rate) as `mean±std`
+- **Table 3**: Distributional statistics (percentiles) for CandOverlap and TokJaccard
+
+With `--latex`, it additionally prints LaTeX-formatted values (e.g. `0.6543$\pm$0.0123`) ready for copy-paste into paper tables.
+
+### Step 2b: Consolidation After Parallel SLURM Jobs
+
+When seeds ran as separate SLURM jobs, each job writes its own 1-row `summary.csv` (overwriting the previous). Before aggregating, re-consolidate all results using `--eval_only`:
+
+```bash
+conda activate pag-env
+cd /gpfs/work4/0/prjs1037/dpo-exp/pag-repro
+
+python -m robustness.evaluation.rq2 \
+    --split dl19 \
+    --attack_method mispelling \
+    --seed all \
+    --eval_only
+
+# Then aggregate
+python -m robustness.evaluation.aggregate_results \
+    --splits dl19 \
+    --attacks mispelling \
+    --latex
+```
+
+The `--eval_only` flag skips GPU inference and only recomputes metrics from existing `run.json` files, rebuilding the combined `summary.csv` with all 5 seed rows.
 
 ---
 

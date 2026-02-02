@@ -475,24 +475,59 @@ for batch in tqdm(q_loader, desc="extract planner tokens"):
     else:
         query_ids = list(batch["id"])
 
-    for qid, tids in zip(query_ids, top_ids):
-        qid_to_tokens[str(qid)] = tids.cpu().tolist()
+    for qid, tids, tscores in zip(query_ids, top_ids, top_scores):
+        qid_to_tokens[str(qid)] = {
+            "token_ids": tids.cpu().tolist(),
+            "scores": tscores.cpu().tolist(),
+        }
 
 import os
 os.makedirs(os.path.dirname(out_path), exist_ok=True)
 with open(out_path, "w") as f:
     json.dump(qid_to_tokens, f)
 
-print(f"[extract] Saved planner tokens for {len(qid_to_tokens)} queries -> {out_path}")
+print(f"[extract] Saved planner tokens+scores for {len(qid_to_tokens)} queries -> {out_path}")
 '''
 
 
 def load_planner_tokens(token_path: str) -> Dict[str, List[int]]:
-    """Load saved planner token IDs."""
+    """Load saved planner token IDs.
+
+    Supports both the new format (``{qid: {token_ids: [...], scores: [...]}}``
+    produced since the scores-saving update) and the legacy format
+    (``{qid: [int, ...]}``).  Always returns ``{qid: [int, ...]}``.
+    """
     if not os.path.exists(token_path):
         return {}
     with open(token_path) as f:
-        return json.load(f)
+        data = json.load(f)
+    if not data:
+        return {}
+    # Detect format from first value
+    first_val = next(iter(data.values()))
+    if isinstance(first_val, dict) and "token_ids" in first_val:
+        return {qid: v["token_ids"] for qid, v in data.items()}
+    return data
+
+
+def load_planner_tokens_with_scores(token_path: str) -> Dict[str, Dict]:
+    """Load saved planner token IDs *and* scores.
+
+    Returns ``{qid: {"token_ids": [int, ...], "scores": [float, ...]}}``
+    when scores are available, or ``{qid: {"token_ids": [int, ...], "scores": None}}``
+    for legacy files that only stored IDs.
+    """
+    if not os.path.exists(token_path):
+        return {}
+    with open(token_path) as f:
+        data = json.load(f)
+    if not data:
+        return {}
+    first_val = next(iter(data.values()))
+    if isinstance(first_val, dict) and "token_ids" in first_val:
+        return data
+    # Legacy format: wrap bare lists
+    return {qid: {"token_ids": v, "scores": None} for qid, v in data.items()}
 
 
 # ---------------------------------------------------------------------------

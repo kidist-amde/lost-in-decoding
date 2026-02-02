@@ -13,10 +13,11 @@ Usage
 
 import argparse
 import csv
+import math
 import os
 import sys
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -44,10 +45,28 @@ def safe_mean(values: List[Optional[float]]) -> Optional[float]:
     return sum(valid) / len(valid) if valid else None
 
 
+def safe_std(values: List[Optional[float]]) -> Optional[float]:
+    valid = [v for v in values if v is not None]
+    if len(valid) < 2:
+        return None
+    mu = sum(valid) / len(valid)
+    return math.sqrt(sum((x - mu) ** 2 for x in valid) / (len(valid) - 1))
+
+
 def fmt(val: Optional[float], digits: int = 4) -> str:
     if val is None:
         return "--"
     return f"{val:.{digits}f}"
+
+
+def fmt_pm(mean: Optional[float], std: Optional[float], digits: int = 4) -> str:
+    """Format as 'mean +/- std'."""
+    if mean is None:
+        return "--"
+    m = f"{mean:.{digits}f}"
+    if std is None:
+        return m
+    return f"{m}\u00b1{std:.{digits}f}"
 
 
 def fmt_delta(val: Optional[float], digits: int = 4) -> str:
@@ -56,10 +75,34 @@ def fmt_delta(val: Optional[float], digits: int = 4) -> str:
     return f"{val:+.{digits}f}" if val != 0 else f"{val:.{digits}f}"
 
 
+def fmt_delta_pm(mean: Optional[float], std: Optional[float], digits: int = 4) -> str:
+    """Format as '+mean +/- std' (signed mean)."""
+    if mean is None:
+        return "--"
+    m = f"{mean:+.{digits}f}" if mean != 0 else f"{mean:.{digits}f}"
+    if std is None:
+        return m
+    return f"{m}\u00b1{std:.{digits}f}"
+
+
+def fmt_pct_pm(mean: Optional[float], std: Optional[float]) -> str:
+    """Format a rate as 'mean% +/- std%'."""
+    if mean is None:
+        return "--"
+    m = f"{mean:.1%}"
+    if std is None:
+        return m
+    return f"{m}\u00b1{std:.1%}"
+
+
 def aggregate_over_seeds(rows: List[Dict]) -> Dict:
     """
-    Group rows by (split, attack_method) and average numeric columns
-    over seeds.
+    Group rows by (split, attack_method) and compute mean and std of
+    numeric columns over seeds.
+
+    For each numeric key ``k``, the aggregated row stores:
+      - ``k``       : mean over seeds  (backward-compatible)
+      - ``k__std``  : sample std over seeds
     """
     groups = defaultdict(list)
     for r in rows:
@@ -69,24 +112,30 @@ def aggregate_over_seeds(rows: List[Dict]) -> Dict:
     agg = {}
     for key, group in groups.items():
         agg_row = {"split": key[0], "attack_method": key[1], "n_seeds": len(group)}
-        # Average all numeric columns
         numeric_keys = [k for k in group[0] if k not in ("split", "attack_method", "seed")]
         for nk in numeric_keys:
             vals = [r[nk] for r in group if r[nk] is not None]
             agg_row[nk] = safe_mean(vals)
+            agg_row[f"{nk}__std"] = safe_std(vals)
         agg[key] = agg_row
     return agg
 
 
+def _get(r: Dict, key: str) -> Tuple[Optional[float], Optional[float]]:
+    """Return (mean, std) for a key from an aggregated row."""
+    return r.get(key), r.get(f"{key}__std")
+
+
 def print_table1(agg: Dict, splits: List[str], attacks: List[str]):
-    """Print Table 1: Retrieval performance under query perturbations."""
-    print("\n" + "=" * 90)
-    print("TABLE 1: Retrieval performance under query perturbations")
-    print("=" * 90)
+    """Print Table 1: Retrieval performance under query perturbations (mean +/- std)."""
+    W = 15  # column width to fit mean±std
+    print("\n" + "=" * 150)
+    print("TABLE 1: Retrieval performance under query perturbations  (mean \u00b1 std over seeds)")
+    print("=" * 150)
     print(f"{'Split':<8} {'Perturbation':<14} "
-          f"{'S1-NDCG':>8} {'Delta':>8} {'S1-MRR':>8} {'Delta':>8} "
-          f"{'S2-NDCG':>8} {'Delta':>8} {'S2-MRR':>8} {'Delta':>8}")
-    print("-" * 90)
+          f"{'S1-NDCG':>{W}} {'Delta':>{W}} {'S1-MRR':>{W}} {'Delta':>{W}} "
+          f"{'S2-NDCG':>{W}} {'Delta':>{W}} {'S2-MRR':>{W}} {'Delta':>{W}}")
+    print("-" * 150)
 
     for split in splits:
         # Clean baseline
@@ -94,16 +143,16 @@ def print_table1(agg: Dict, splits: List[str], attacks: List[str]):
         if clean_key not in agg:
             continue
         clean = agg[clean_key]
-        clean_lex_ndcg = clean.get("clean_lex_NDCG@10")
-        clean_lex_mrr = clean.get("clean_lex_MRR@10")
-        clean_smt_ndcg = clean.get("clean_smt_NDCG@10")
-        clean_smt_mrr = clean.get("clean_smt_MRR@10")
+        cl_n, cl_n_s = _get(clean, "clean_lex_NDCG@10")
+        cl_m, cl_m_s = _get(clean, "clean_lex_MRR@10")
+        cs_n, cs_n_s = _get(clean, "clean_smt_NDCG@10")
+        cs_m, cs_m_s = _get(clean, "clean_smt_MRR@10")
 
         print(f"{split:<8} {'Clean':<14} "
-              f"{fmt(clean_lex_ndcg):>8} {'--':>8} "
-              f"{fmt(clean_lex_mrr):>8} {'--':>8} "
-              f"{fmt(clean_smt_ndcg):>8} {'--':>8} "
-              f"{fmt(clean_smt_mrr):>8} {'--':>8}")
+              f"{fmt_pm(cl_n, cl_n_s):>{W}} {'--':>{W}} "
+              f"{fmt_pm(cl_m, cl_m_s):>{W}} {'--':>{W}} "
+              f"{fmt_pm(cs_n, cs_n_s):>{W}} {'--':>{W}} "
+              f"{fmt_pm(cs_m, cs_m_s):>{W}} {'--':>{W}}")
 
         for attack in attacks:
             key = (split, attack)
@@ -111,37 +160,40 @@ def print_table1(agg: Dict, splits: List[str], attacks: List[str]):
                 continue
             r = agg[key]
 
-            # Compute deltas from clean
-            pert_lex_ndcg = r.get("pert_lex_NDCG@10")
-            pert_lex_mrr = r.get("pert_lex_MRR@10")
-            pert_smt_ndcg = r.get("pert_smt_NDCG@10")
-            pert_smt_mrr = r.get("pert_smt_MRR@10")
+            pln, pln_s = _get(r, "pert_lex_NDCG@10")
+            plm, plm_s = _get(r, "pert_lex_MRR@10")
+            psn, psn_s = _get(r, "pert_smt_NDCG@10")
+            psm, psm_s = _get(r, "pert_smt_MRR@10")
 
-            d_lex_ndcg = (clean_lex_ndcg - pert_lex_ndcg) if (clean_lex_ndcg is not None and pert_lex_ndcg is not None) else None
-            d_lex_mrr = (clean_lex_mrr - pert_lex_mrr) if (clean_lex_mrr is not None and pert_lex_mrr is not None) else None
-            d_smt_ndcg = (clean_smt_ndcg - pert_smt_ndcg) if (clean_smt_ndcg is not None and pert_smt_ndcg is not None) else None
-            d_smt_mrr = (clean_smt_mrr - pert_smt_mrr) if (clean_smt_mrr is not None and pert_smt_mrr is not None) else None
+            # delta_lex and delta_smt are already in the CSV from rq2.py
+            dln, dln_s = _get(r, "delta_lex_NDCG@10")
+            dlm, dlm_s = _get(r, "delta_lex_MRR@10")
+            dsn, dsn_s = _get(r, "delta_smt_NDCG@10")
+            dsm, dsm_s = _get(r, "delta_smt_MRR@10")
 
             attack_label = "Misspelling" if attack == "mispelling" else attack.capitalize()
             print(f"{'':8} {attack_label:<14} "
-                  f"{fmt(pert_lex_ndcg):>8} {fmt_delta(-d_lex_ndcg if d_lex_ndcg is not None else None):>8} "
-                  f"{fmt(pert_lex_mrr):>8} {fmt_delta(-d_lex_mrr if d_lex_mrr is not None else None):>8} "
-                  f"{fmt(pert_smt_ndcg):>8} {fmt_delta(-d_smt_ndcg if d_smt_ndcg is not None else None):>8} "
-                  f"{fmt(pert_smt_mrr):>8} {fmt_delta(-d_smt_mrr if d_smt_mrr is not None else None):>8}")
+                  f"{fmt_pm(pln, pln_s):>{W}} {fmt_delta_pm(dln, dln_s):>{W}} "
+                  f"{fmt_pm(plm, plm_s):>{W}} {fmt_delta_pm(dlm, dlm_s):>{W}} "
+                  f"{fmt_pm(psn, psn_s):>{W}} {fmt_delta_pm(dsn, dsn_s):>{W}} "
+                  f"{fmt_pm(psm, psm_s):>{W}} {fmt_delta_pm(dsm, dsm_s):>{W}}")
 
-        print("-" * 90)
+        print("-" * 150)
 
 
 def print_table2(agg: Dict, splits: List[str], attacks: List[str]):
-    """Print Table 2: Planner stability and sensitivity to plan corruption."""
-    print("\n" + "=" * 100)
-    print("TABLE 2: Planner stability and sensitivity to plan corruption")
-    print("=" * 100)
+    """Print Table 2: Planner stability and sensitivity (mean +/- std)."""
+    W = 15
+    print("\n" + "=" * 170)
+    print("TABLE 2: Planner stability and sensitivity to plan corruption  (mean \u00b1 std over seeds)")
+    print("=" * 170)
     print(f"{'Split':<8} {'Perturbation':<14} "
-          f"{'CandOvlp':>9} {'PlanInt':>9} "
-          f"{'SeqGain-MRR':>12} {'SeqGain-NDCG':>13} "
-          f"{'SwapDrp-MRR':>12} {'SwapDrp-NDCG':>13}")
-    print("-" * 100)
+          f"{'CandOvlp':>{W}} {'PlanInt':>{W}} "
+          f"{'TokOvlp/l':>{W}} "
+          f"{'SeqGain-MRR':>{W}} {'SeqGain-NDCG':>{W}} "
+          f"{'SwapDrp-MRR':>{W}} {'SwapDrp-NDCG':>{W}} "
+          f"{'Collps%':>{W}}")
+    print("-" * 170)
 
     for split in splits:
         for attack in attacks:
@@ -150,25 +202,97 @@ def print_table2(agg: Dict, splits: List[str], attacks: List[str]):
                 continue
             r = agg[key]
 
-            cand_overlap = r.get("CandOverlap@100")
-            plan_intersect = r.get("PlanIntersect@100")
-            sg_mrr = r.get("SeqGain_MRR@10")
-            sg_ndcg = r.get("SeqGain_NDCG@10")
-            psd_mrr = r.get("PlanSwapDrop_MRR@10")
-            psd_ndcg = r.get("PlanSwapDrop_NDCG@10")
+            co, co_s = _get(r, "CandOverlap@100")
+            pi, pi_s = _get(r, "PlanIntersect@100")
+            to, to_s = _get(r, "TokOverlapAtEll@100_mean")
+            sg_m, sg_m_s = _get(r, "SeqGain_MRR@10")
+            sg_n, sg_n_s = _get(r, "SeqGain_NDCG@10")
+            psd_m, psd_m_s = _get(r, "PlanSwapDrop_MRR@10")
+            psd_n, psd_n_s = _get(r, "PlanSwapDrop_NDCG@10")
+            cr, cr_s = _get(r, "collapse_rate")
 
             attack_label = "Misspelling" if attack == "mispelling" else attack.capitalize()
             print(f"{split:<8} {attack_label:<14} "
-                  f"{fmt(cand_overlap):>9} {fmt(plan_intersect):>9} "
-                  f"{fmt_delta(sg_mrr):>12} {fmt_delta(sg_ndcg):>13} "
-                  f"{fmt_delta(psd_mrr):>12} {fmt_delta(psd_ndcg):>13}")
+                  f"{fmt_pm(co, co_s):>{W}} {fmt_pm(pi, pi_s):>{W}} "
+                  f"{fmt_pm(to, to_s):>{W}} "
+                  f"{fmt_delta_pm(sg_m, sg_m_s):>{W}} {fmt_delta_pm(sg_n, sg_n_s):>{W}} "
+                  f"{fmt_delta_pm(psd_m, psd_m_s):>{W}} {fmt_delta_pm(psd_n, psd_n_s):>{W}} "
+                  f"{fmt_pct_pm(cr, cr_s):>{W}}")
 
-        print("-" * 100)
+        print("-" * 170)
+
+
+def print_table3(agg: Dict, splits: List[str], attacks: List[str]):
+    """Print Table 3: Stability distributional statistics (mean +/- std over seeds)."""
+    W = 15
+    stats = ["mean", "median", "p10", "p25", "p75", "p90"]
+    header_w = W * len(stats) + len(stats) - 1
+    print("\n" + "=" * (22 + 2 * header_w + 2))
+    print("TABLE 3: Stability distributional statistics  (mean \u00b1 std over seeds)")
+    print("=" * (22 + 2 * header_w + 2))
+    print(f"{'Split':<8} {'Perturbation':<14} "
+          f"{'--- CandOverlap@100 ---':^{header_w}s}  "
+          f"{'--- TokJaccard@100 ---':^{header_w}s}")
+    print(f"{'':8} {'':14} "
+          + " ".join(f"{s:>{W}}" for s in stats)
+          + "  "
+          + " ".join(f"{s:>{W}}" for s in stats))
+    print("-" * (22 + 2 * header_w + 2))
+
+    for split in splits:
+        for attack in attacks:
+            key = (split, attack)
+            if key not in agg:
+                continue
+            r = agg[key]
+
+            attack_label = "Misspelling" if attack == "mispelling" else attack.capitalize()
+
+            co_str = " ".join(
+                f"{fmt_pm(*_get(r, f'CandOverlap@100_{s}')):>{W}}" for s in stats
+            )
+            tj_str = " ".join(
+                f"{fmt_pm(*_get(r, f'TokJaccard@100_{s}')):>{W}}" for s in stats
+            )
+
+            print(f"{split:<8} {attack_label:<14} {co_str}  {tj_str}")
+
+        print("-" * (22 + 2 * header_w + 2))
+
+
+def _latex_pm(mean: Optional[float], std: Optional[float], digits: int = 4) -> str:
+    """Format as 'mean$\\pm$std' for LaTeX."""
+    if mean is None:
+        return "--"
+    m = f"{mean:.{digits}f}"
+    if std is None:
+        return m
+    return f"{m}$\\pm${std:.{digits}f}"
+
+
+def _latex_delta_pm(mean: Optional[float], std: Optional[float], digits: int = 4) -> str:
+    """Format as '+mean$\\pm$std' (signed mean) for LaTeX."""
+    if mean is None:
+        return "--"
+    m = f"{mean:+.{digits}f}" if mean != 0 else f"{mean:.{digits}f}"
+    if std is None:
+        return m
+    return f"{m}$\\pm${std:.{digits}f}"
+
+
+def _latex_pct_pm(mean: Optional[float], std: Optional[float]) -> str:
+    """Format a rate as 'mean%$\\pm$std%' for LaTeX."""
+    if mean is None:
+        return "--"
+    m = f"{mean:.1%}"
+    if std is None:
+        return m
+    return f"{m}$\\pm${std:.1%}"
 
 
 def print_latex_table1(agg: Dict, splits: List[str], attacks: List[str]):
-    """Print LaTeX-formatted Table 1 values."""
-    print("\n% LaTeX Table 1 values (copy into your table)")
+    """Print LaTeX-formatted Table 1 values (mean $\\pm$ std)."""
+    print("\n% LaTeX Table 1 values (mean $\\pm$ std over seeds)")
     print("% Format: NDCG@10 & Delta & MRR@10 & Delta & NDCG@10 & Delta & MRR@10 & Delta")
 
     for split in splits:
@@ -176,40 +300,47 @@ def print_latex_table1(agg: Dict, splits: List[str], attacks: List[str]):
         if clean_key not in agg:
             continue
         clean = agg[clean_key]
-        cn = clean.get("clean_lex_NDCG@10")
-        cm = clean.get("clean_lex_MRR@10")
-        csn = clean.get("clean_smt_NDCG@10")
-        csm = clean.get("clean_smt_MRR@10")
+        cl_n, cl_n_s = _get(clean, "clean_lex_NDCG@10")
+        cl_m, cl_m_s = _get(clean, "clean_lex_MRR@10")
+        cs_n, cs_n_s = _get(clean, "clean_smt_NDCG@10")
+        cs_m, cs_m_s = _get(clean, "clean_smt_MRR@10")
 
         split_label = {"dl19": "DL19", "dl20": "DL20", "dev": "Dev"}[split]
         print(f"% {split_label} Clean")
-        print(f"  & Clean & {fmt(cn)} & -- & {fmt(cm)} & -- & {fmt(csn)} & -- & {fmt(csm)} & -- \\\\")
+        print(f"  & Clean & {_latex_pm(cl_n, cl_n_s)} & -- "
+              f"& {_latex_pm(cl_m, cl_m_s)} & -- "
+              f"& {_latex_pm(cs_n, cs_n_s)} & -- "
+              f"& {_latex_pm(cs_m, cs_m_s)} & -- \\\\")
 
         for attack in attacks:
             key = (split, attack)
             if key not in agg:
                 continue
             r = agg[key]
-            pn = r.get("pert_lex_NDCG@10")
-            pm = r.get("pert_lex_MRR@10")
-            psn = r.get("pert_smt_NDCG@10")
-            psm = r.get("pert_smt_MRR@10")
+            pln, pln_s = _get(r, "pert_lex_NDCG@10")
+            plm, plm_s = _get(r, "pert_lex_MRR@10")
+            psn, psn_s = _get(r, "pert_smt_NDCG@10")
+            psm, psm_s = _get(r, "pert_smt_MRR@10")
 
-            dn = (cn - pn) if (cn is not None and pn is not None) else None
-            dm = (cm - pm) if (cm is not None and pm is not None) else None
-            dsn = (csn - psn) if (csn is not None and psn is not None) else None
-            dsm = (csm - psm) if (csm is not None and psm is not None) else None
+            dln, dln_s = _get(r, "delta_lex_NDCG@10")
+            dlm, dlm_s = _get(r, "delta_lex_MRR@10")
+            dsn, dsn_s = _get(r, "delta_smt_NDCG@10")
+            dsm, dsm_s = _get(r, "delta_smt_MRR@10")
 
             attack_label = "Misspelling" if attack == "mispelling" else attack.capitalize()
             print(f"% {split_label} {attack_label}")
-            print(f"  & {attack_label} & {fmt(pn)} & {fmt(dn)} & {fmt(pm)} & {fmt(dm)} "
-                  f"& {fmt(psn)} & {fmt(dsn)} & {fmt(psm)} & {fmt(dsm)} \\\\")
+            print(f"  & {attack_label} "
+                  f"& {_latex_pm(pln, pln_s)} & {_latex_delta_pm(dln, dln_s)} "
+                  f"& {_latex_pm(plm, plm_s)} & {_latex_delta_pm(dlm, dlm_s)} "
+                  f"& {_latex_pm(psn, psn_s)} & {_latex_delta_pm(dsn, dsn_s)} "
+                  f"& {_latex_pm(psm, psm_s)} & {_latex_delta_pm(dsm, dsm_s)} \\\\")
 
 
 def print_latex_table2(agg: Dict, splits: List[str], attacks: List[str]):
-    """Print LaTeX-formatted Table 2 values."""
-    print("\n% LaTeX Table 2 values (copy into your table)")
-    print("% Format: CandOverlap@100 & PlanIntersect@100 & SeqGain(MRR/NDCG) & PlanSwapDrop(MRR/NDCG)")
+    """Print LaTeX-formatted Table 2 values (mean $\\pm$ std)."""
+    print("\n% LaTeX Table 2 values (mean $\\pm$ std over seeds)")
+    print("% Format: CandOverlap@100 & TokJaccard@100 & TokOverlap/ell"
+          " & SeqGain(MRR) & SeqGain(NDCG) & PlanSwapDrop(MRR) & PlanSwapDrop(NDCG) & CollapseRate")
 
     for split in splits:
         for attack in attacks:
@@ -218,21 +349,24 @@ def print_latex_table2(agg: Dict, splits: List[str], attacks: List[str]):
                 continue
             r = agg[key]
 
-            co = r.get("CandOverlap@100")
-            pi = r.get("PlanIntersect@100")
-            sg_m = r.get("SeqGain_MRR@10")
-            sg_n = r.get("SeqGain_NDCG@10")
-            psd_m = r.get("PlanSwapDrop_MRR@10")
-            psd_n = r.get("PlanSwapDrop_NDCG@10")
+            co, co_s = _get(r, "CandOverlap@100")
+            pi, pi_s = _get(r, "PlanIntersect@100")
+            to, to_s = _get(r, "TokOverlapAtEll@100_mean")
+            sg_m, sg_m_s = _get(r, "SeqGain_MRR@10")
+            sg_n, sg_n_s = _get(r, "SeqGain_NDCG@10")
+            psd_m, psd_m_s = _get(r, "PlanSwapDrop_MRR@10")
+            psd_n, psd_n_s = _get(r, "PlanSwapDrop_NDCG@10")
+            cr, cr_s = _get(r, "collapse_rate")
 
             split_label = {"dl19": "DL19", "dl20": "DL20", "dev": "Dev"}[split]
             attack_label = "Misspelling" if attack == "mispelling" else attack.capitalize()
 
-            sg_str = f"{fmt_delta(sg_m)}/{fmt_delta(sg_n)}"
-            psd_str = f"{fmt_delta(psd_m)}/{fmt_delta(psd_n)}"
-
             print(f"% {split_label} {attack_label}")
-            print(f"  & {attack_label} & {fmt(co)} & {fmt(pi)} & {sg_str} & {psd_str} \\\\")
+            print(f"  & {attack_label} "
+                  f"& {_latex_pm(co, co_s)} & {_latex_pm(pi, pi_s)} & {_latex_pm(to, to_s)} "
+                  f"& {_latex_delta_pm(sg_m, sg_m_s)} & {_latex_delta_pm(sg_n, sg_n_s)} "
+                  f"& {_latex_delta_pm(psd_m, psd_m_s)} & {_latex_delta_pm(psd_n, psd_n_s)} "
+                  f"& {_latex_pct_pm(cr, cr_s)} \\\\")
 
 
 def main():
@@ -274,6 +408,7 @@ def main():
 
     print_table1(agg, args.splits, args.attacks)
     print_table2(agg, args.splits, args.attacks)
+    print_table3(agg, args.splits, args.attacks)
 
     if args.latex:
         print_latex_table1(agg, args.splits, args.attacks)
