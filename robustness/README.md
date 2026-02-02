@@ -494,7 +494,22 @@ With `--latex`, it additionally prints LaTeX-formatted values (e.g. `0.6543$\pm$
 
 ### Step 2b: Consolidation After Parallel SLURM Jobs
 
-When seeds ran as separate SLURM jobs, each job writes its own 1-row `summary.csv` (overwriting the previous). Before aggregating, re-consolidate all results using `--eval_only`:
+When seeds ran as separate SLURM jobs, each job writes its own 1-row `summary.csv` (overwriting the previous). **No inference data is lost.** The actual inference outputs are saved as individual `run.json` files per seed in separate directories that never conflict:
+
+```
+experiments/RQ2_robustness/TREC_DL_2019/
+├── clean/pag/lex_ret/TREC_DL_2019/run.json       # Clean Stage 1 (shared)
+├── clean/pag/smt_ret/TREC_DL_2019/run.json       # Clean Stage 2 (shared)
+├── perturbed/mispelling_seed_1999/pag/.../run.json
+├── perturbed/mispelling_seed_5/pag/.../run.json
+├── perturbed/mispelling_seed_27/pag/.../run.json
+├── perturbed/mispelling_seed_2016/pag/.../run.json
+└── perturbed/mispelling_seed_2026/pag/.../run.json
+```
+
+Only `summary.csv` (a derived summary) gets overwritten. It can be rebuilt at any time from the `run.json` files using `--eval_only`. Before aggregating, re-consolidate all results:
+
+**Single attack method (5 seeds):**
 
 ```bash
 conda activate pag-env
@@ -513,7 +528,30 @@ python -m robustness.evaluation.aggregate_results \
     --latex
 ```
 
-The `--eval_only` flag skips GPU inference and only recomputes metrics from existing `run.json` files, rebuilding the combined `summary.csv` with all 5 seed rows.
+**All 5 attack methods × 5 seeds (25 jobs):**
+
+When you ran all 25 jobs in parallel (`bash robustness/scripts/run_rq2_pipeline.sh dl19`), the same overwrite issue applies — all 25 jobs write to the same `summary.csv`. After all jobs finish, consolidate everything in one command:
+
+```bash
+conda activate pag-env
+cd /gpfs/work4/0/prjs1037/dpo-exp/pag-repro
+
+python -m robustness.evaluation.rq2 \
+    --split dl19 \
+    --attack_method all \
+    --seed all \
+    --eval_only
+
+# Then aggregate over all 5 attack methods
+python -m robustness.evaluation.aggregate_results \
+    --splits dl19 \
+    --attacks mispelling ordering synonym paraphrase naturality \
+    --latex
+```
+
+This rebuilds `summary.csv` with all 25 rows (5 attacks × 5 seeds), then produces mean ± std tables for each attack method.
+
+The `--eval_only` flag skips GPU inference and only recomputes metrics from existing `run.json` files, rebuilding the combined `summary.csv` with all seed rows.
 
 ---
 
