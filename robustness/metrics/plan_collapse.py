@@ -84,6 +84,49 @@ def candidate_size_ratio(
     return ratios
 
 
+def plan_intersect(
+    clean_tokens: Dict[str, List[int]],
+    perturbed_tokens: Dict[str, List[int]],
+    topk: int = 100,
+) -> Dict[str, Dict[str, float]]:
+    """
+    Per-query overlap of top-K planner *tokens* (vocabulary IDs) between
+    clean and perturbed queries.
+
+    This measures token-plan drift: whether the planner selects similar
+    vocabulary terms for the clean vs. perturbed query.
+
+    Parameters
+    ----------
+    clean_tokens : {qid: [token_id, ...]}
+        Top-K planner token IDs for clean queries (sorted by descending score).
+    perturbed_tokens : {qid: [token_id, ...]}
+        Top-K planner token IDs for perturbed queries.
+
+    Returns
+    -------
+    {qid: {"jaccard": float, "intersection_size": int,
+            "clean_size": int, "perturbed_size": int}}
+    """
+    results = {}
+    common_qids = set(clean_tokens.keys()) & set(perturbed_tokens.keys())
+
+    for qid in common_qids:
+        clean_set = set(clean_tokens[qid][:topk])
+        perturbed_set = set(perturbed_tokens[qid][:topk])
+        inter = clean_set & perturbed_set
+        union = clean_set | perturbed_set
+        jaccard = len(inter) / len(union) if union else 1.0
+
+        results[qid] = {
+            "jaccard": jaccard,
+            "intersection_size": len(inter),
+            "clean_size": len(clean_set),
+            "perturbed_size": len(perturbed_set),
+        }
+    return results
+
+
 def rank_correlation(
     clean_run: Dict[str, Dict[str, float]],
     perturbed_run: Dict[str, Dict[str, float]],
@@ -146,14 +189,17 @@ def aggregate_plan_collapse(
     clean_smt_run: Optional[Dict[str, Dict[str, float]]] = None,
     perturbed_smt_run: Optional[Dict[str, Dict[str, float]]] = None,
     topk: int = 100,
+    clean_planner_tokens: Optional[Dict[str, List[int]]] = None,
+    perturbed_planner_tokens: Optional[Dict[str, List[int]]] = None,
 ) -> Dict[str, float]:
     """
     Compute aggregate plan-collapse statistics.
 
     Returns a dict with:
-      - avg_jaccard@{topk}
+      - avg_jaccard@{topk}          (CandOverlap@K)
       - avg_size_ratio
       - avg_rank_correlation@{topk}
+      - avg_plan_intersect@{topk}   (PlanIntersect@K, if tokens provided)
       - n_queries
     """
     overlap = candidate_overlap(clean_lex_run, perturbed_lex_run, topk)
@@ -175,6 +221,15 @@ def aggregate_plan_collapse(
         stats[f"avg_rank_correlation@{topk}"] = _safe_mean(list(corr.values()))
     except ImportError:
         stats[f"avg_rank_correlation@{topk}"] = None
+
+    # PlanIntersect: token-level plan overlap
+    if clean_planner_tokens and perturbed_planner_tokens:
+        pi = plan_intersect(clean_planner_tokens, perturbed_planner_tokens, topk)
+        stats[f"avg_plan_intersect@{topk}"] = _safe_mean(
+            [v["jaccard"] for v in pi.values()]
+        )
+    else:
+        stats[f"avg_plan_intersect@{topk}"] = None
 
     return stats
 

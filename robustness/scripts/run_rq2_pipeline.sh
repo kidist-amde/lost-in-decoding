@@ -23,6 +23,13 @@ else
 fi
 
 if [ "$ATTACK_ARG" = "all" ]; then
+    # Paper tables use only misspelling and paraphrase.
+    # To run all five methods, pass "all5" as the second argument.
+    attack_method_list=(
+        "mispelling"
+        "paraphrase"
+    )
+elif [ "$ATTACK_ARG" = "all5" ]; then
     attack_method_list=(
         "mispelling"
         "ordering"

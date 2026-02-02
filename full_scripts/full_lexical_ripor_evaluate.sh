@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=pag_infer
 #SBATCH --partition=gpu_h100
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:4     # 4 GPU for  RQ1(ii) decoding efficiency experiments
 #SBATCH --time=4:00:00
-#SBATCH --output=experiments/%x-%j_RQ1.out
-#SBATCH --error=experiments/%x-%j_RQ1.err
+#SBATCH --output=experiments/Ablations/%x-%j_RQ1_iii_wo_adding_s_simul.out
+#SBATCH --error=experiments/Ablations/%x-%j_RQ1_iii_wo_adding_s_simul.err
 #SBATCH --chdir=/gpfs/work4/0/prjs1037/dpo-exp/pag-repro/
 
-mkdir -p experiments
+mkdir -p experiments/Ablations
 
 # initialize conda for non-interactive shells
 source ~/miniconda3/etc/profile.d/conda.sh   
@@ -46,7 +46,7 @@ if [ $task = "constrained_beam_search_for_qid_rankdata" ]; then
     data_dir="./data/experiments-full-lexical-ripor/t5-full-dense-1-5e-4-12l"
     docid_to_tokenids_path=$data_dir/aq_smtid/docid_to_tokenids.json 
 
-    model_dir=./data/$experiment_dir/ripor_direct_lng_knp_seq2seq_1
+    model_dir=./data/$experiment_dir/lexical_ripor_direct_lng_knp_seq2seq_1
     pretrained_path=$model_dir/checkpoint
 
     # need to modify for a new experiment
@@ -77,7 +77,7 @@ elif [ $task = "constrained_beam_search_for_qid_rankdata_for_train" ]; then
     data_dir="./data/experiments-full-lexical-ripor/t5-full-dense-1-5e-4-12l"
     docid_to_tokenids_path=$data_dir/aq_smtid/docid_to_tokenids.json 
 
-    model_dir=./data/$experiment_dir/ripor_direct_lng_knp_seq2seq_1
+    model_dir=./data/$experiment_dir/lexical_ripor_direct_lng_knp_seq2seq_1
     pretrained_path=$model_dir/checkpoint
 
     # need to modify for a new experiment
@@ -126,7 +126,7 @@ elif [ $task = "constrained_beam_search_for_doc_ret_by_sub_tokens" ]; then
     data_dir="./data/experiments-full-lexical-ripor/t5-full-dense-1-5e-4-12l"
     docid_to_tokenids_path=$data_dir/aq_smtid/docid_to_tokenids.json 
 
-    model_dir=./data/$experiment_dir/ripor_direct_lng_knp_seq2seq_1
+    model_dir=./data/$experiment_dir/lexical_ripor_direct_lng_knp_seq2seq_1
     pretrained_path=$model_dir/checkpoint
 
     # need to modify for a new experiment
@@ -137,16 +137,20 @@ elif [ $task = "constrained_beam_search_for_doc_ret_by_sub_tokens" ]; then
 
         out_dir=$model_dir/doc_ret_by_sub_tokens/ret_"$topk"_sub_"$max_new_token"/
 
-        #export CUDA_VISIBLE_DEVICES=4,5,6,7
-        #python -m torch.distributed.launch --nproc_per_node=4 -m t5_pretrainer.evaluate \
-        #    --pretrained_path=$pretrained_path \
-        #    --out_dir=$out_dir \
-        #    --task=constrained_beam_search_for_qid_rankdata \
-        #    --docid_to_tokenids_path=$docid_to_tokenids_path \
-        #    --q_collection_paths=$q_collection_paths \
-        #    --batch_size=2 \
-        #    --max_new_token_for_docid=$max_new_token \
-        #    --topk=$topk
+        # #NOTE: Uncoment when running task="constrained_beam_search_for_doc_ret_by_sub_tokens"
+        # # If running from scratch (no run.json files in $out_dir), keep this block uncommented
+        # # to generate retrieval runs before evaluation. If you already have run.json outputs
+        # # (e.g., copied from an artifact), you can comment this block to skip generation.
+        # #export CUDA_VISIBLE_DEVICES=4,5,6,7
+        # python -m torch.distributed.launch --nproc_per_node=4 -m t5_pretrainer.evaluate \
+        #     --pretrained_path=$pretrained_path \
+        #     --out_dir=$out_dir \
+        #     --task=constrained_beam_search_for_qid_rankdata \
+        #     --docid_to_tokenids_path=$docid_to_tokenids_path \
+        #     --q_collection_paths=$q_collection_paths \
+        #     --batch_size=2 \
+        #     --max_new_token_for_docid=$max_new_token \
+        #     --topk=$topk
 
         python -m t5_pretrainer.evaluate \
             --task=constrained_beam_search_for_qid_rankdata_2 \
@@ -160,7 +164,7 @@ elif [ $task = "constrained_beam_search_for_qid_rankdata_sub_tokens" ]; then
     data_dir="./data/experiments-full-lexical-ripor/t5-full-dense-1-5e-4-12l"
     docid_to_tokenids_path=$data_dir/aq_smtid/docid_to_tokenids.json 
 
-    model_dir=./data/$experiment_dir/ripor_direct_lng_knp_seq2seq_1
+    model_dir=./data/$experiment_dir/lexical_ripor_direct_lng_knp_seq2seq_1
     pretrained_path=$model_dir/checkpoint
 
     # need to modify for a new experiment
@@ -375,6 +379,7 @@ elif [ $task = "lexical_constrained_retrieve_and_rerank" ]; then
     model_dir="./data/experiments-full-lexical-ripor/lexical_ripor_direct_lng_knp_seq2seq_1"
     pretrained_path=$model_dir/checkpoint/
     max_new_token_for_docid=8
+    out_dir=$model_dir/lex_ret_and_rerank
 
     for lex_topk in 1000
     do  

@@ -386,3 +386,153 @@ def load_sequential_run(smt_out_dir: str, dataset_name: str) -> Dict:
         return {}
     with open(run_path) as f:
         return json.load(f)
+
+
+# ---------------------------------------------------------------------------
+# Extract planner token representations (for PlanIntersect@K)
+# ---------------------------------------------------------------------------
+
+def extract_planner_tokens(
+    query_dir: str,
+    out_path: str,
+    pretrained_path: str = PRETRAINED_PATH,
+    topk: int = 100,
+    batch_size: int = 8,
+    max_length: int = 128,
+) -> Dict[str, List[int]]:
+    """
+    Run the lexical planner on queries and save the top-K planner token IDs
+    per query.  These are the highest-scoring vocabulary tokens from the
+    planner's simultaneous decoding output (shape [bz, vocab_size]).
+
+    Returns {qid: [token_id_1, token_id_2, ...]} sorted by descending score.
+    """
+    cmd = [
+        sys.executable, "-c",
+        _EXTRACT_TOKENS_SCRIPT,
+        query_dir,
+        out_path,
+        pretrained_path,
+        str(topk),
+        str(batch_size),
+        str(max_length),
+    ]
+    rc = _run_cmd(cmd)
+    if rc != 0:
+        print(f"[pag_inference] extract_planner_tokens failed (rc={rc})")
+        return {}
+
+    if os.path.exists(out_path):
+        with open(out_path) as f:
+            return json.load(f)
+    return {}
+
+
+# Inline script executed as a subprocess so we can import torch/model
+# without polluting the main process state.
+_EXTRACT_TOKENS_SCRIPT = r'''
+import json, sys, torch
+from tqdm import tqdm
+
+query_dir = sys.argv[1]
+out_path = sys.argv[2]
+pretrained_path = sys.argv[3]
+topk = int(sys.argv[4])
+batch_size = int(sys.argv[5])
+max_length = int(sys.argv[6])
+
+sys.path.insert(0, ".")
+from t5_pretrainer.modeling.t5_generative_retriever import LexicalRipor
+from t5_pretrainer.dataset.dataset import CollectionDatasetPreLoad
+from t5_pretrainer.dataset.dataloader import T5SpladeCollectionDataLoader
+
+model = LexicalRipor.from_pretrained(pretrained_path)
+model.eval()
+device = "cuda:0"
+model.to(device)
+model.base_model.mode = "lex_retrieval"
+
+q_collection = CollectionDatasetPreLoad(data_dir=query_dir, id_style="row_id")
+q_loader = T5SpladeCollectionDataLoader(
+    dataset=q_collection, tokenizer_type=pretrained_path,
+    max_length=max_length, batch_size=batch_size,
+    shuffle=False, num_workers=1,
+)
+
+qid_to_tokens = {}
+for batch in tqdm(q_loader, desc="extract planner tokens"):
+    with torch.no_grad():
+        inputs = {k: v.to(device) for k, v in batch.items() if k != "id"}
+        batch_preds = model.encode(**inputs)
+        if isinstance(batch_preds, tuple):
+            batch_preds = batch_preds[0]
+        top_scores, top_ids = torch.topk(batch_preds, k=topk, dim=-1)
+
+    if isinstance(batch["id"], torch.LongTensor):
+        query_ids = batch["id"].tolist()
+    elif isinstance(batch["id"], list):
+        query_ids = batch["id"]
+    else:
+        query_ids = list(batch["id"])
+
+    for qid, tids in zip(query_ids, top_ids):
+        qid_to_tokens[str(qid)] = tids.cpu().tolist()
+
+import os
+os.makedirs(os.path.dirname(out_path), exist_ok=True)
+with open(out_path, "w") as f:
+    json.dump(qid_to_tokens, f)
+
+print(f"[extract] Saved planner tokens for {len(qid_to_tokens)} queries -> {out_path}")
+'''
+
+
+def load_planner_tokens(token_path: str) -> Dict[str, List[int]]:
+    """Load saved planner token IDs."""
+    if not os.path.exists(token_path):
+        return {}
+    with open(token_path) as f:
+        return json.load(f)
+
+
+# ---------------------------------------------------------------------------
+# Plan-swapped decoding (for PlanSwapDrop)
+# ---------------------------------------------------------------------------
+
+def run_plan_swapped_decoding(
+    query_dir: str,
+    smt_out_dir: str,
+    swap_lex_out_dir: str,
+    pretrained_path: str = PRETRAINED_PATH,
+    lex_docid_path: str = LEX_DOCID_PATH,
+    smt_docid_path: str = SMT_DOCID_PATH,
+    topk: int = 100,
+    max_new_token: int = 8,
+    batch_size: int = 16,
+    max_length: int = 128,
+    lex_constrained: str = "lexical_tmp_rescore",
+    eval_qrel_path: Optional[str] = None,
+    n_gpu: int = 1,
+) -> int:
+    """
+    Plan-swapped Stage 2: decode ``query_dir`` queries using the lexical
+    planner output from ``swap_lex_out_dir`` (which may come from a different
+    query condition, e.g. clean queries).
+
+    This measures how sensitive Stage 2 is to plan correctness.
+    """
+    return run_sequential_decoding(
+        query_dir=query_dir,
+        smt_out_dir=smt_out_dir,
+        lex_out_dir=swap_lex_out_dir,
+        pretrained_path=pretrained_path,
+        lex_docid_path=lex_docid_path,
+        smt_docid_path=smt_docid_path,
+        topk=topk,
+        max_new_token=max_new_token,
+        batch_size=batch_size,
+        max_length=max_length,
+        lex_constrained=lex_constrained,
+        eval_qrel_path=eval_qrel_path,
+        n_gpu=n_gpu,
+    )

@@ -7,9 +7,10 @@ This script evaluates PAG's robustness to query perturbations by:
 2. Running the PAG pipeline (lexical planner + sequential decoder) on both
    clean and perturbed queries.
 3. Computing retrieval quality metrics (NDCG@10, MRR@10, Recall).
-4. Computing plan-collapse metrics (candidate overlap, size ratio, rank
-   correlation) and sequential recovery deltas.
-5. Saving results to experiments/RQ2_robustness/.
+4. Computing plan-collapse metrics (CandOverlap@100, PlanIntersect@100,
+   rank correlation) and sequential recovery deltas.
+5. Running plan-swapped decoding to measure PlanSwapDrop.
+6. Saving results to experiments/RQ2_robustness/.
 
 Usage
 -----
@@ -49,18 +50,19 @@ from robustness.query_variations.loader import (
     prepare_split_queries,
 )
 from robustness.utils.pag_inference import (
-    LEX_DOCID_PATH,
-    MODEL_DIR,
-    PRETRAINED_PATH,
-    SMT_DOCID_PATH,
+    extract_planner_tokens,
     load_lexical_run,
+    load_planner_tokens,
     load_sequential_run,
+    merge_and_evaluate,
+    run_plan_swapped_decoding,
     run_pag_pipeline,
 )
 from robustness.metrics.plan_collapse import (
     aggregate_plan_collapse,
     candidate_overlap,
     compute_retrieval_metrics,
+    plan_intersect,
     recovery_delta,
 )
 
@@ -101,6 +103,15 @@ def evaluate_single(
 ) -> Dict:
     """
     Run the full RQ2 evaluation for one (split, attack_method, seed) triple.
+
+    Produces all metrics needed for Table 1 (retrieval quality) and
+    Table 2 (plan collapse / sensitivity):
+      - Stage 1 (SimulOnly) NDCG@10, MRR@10  (clean + perturbed)
+      - Stage 2 (PAG)       NDCG@10, MRR@10  (clean + perturbed)
+      - CandOverlap@100     (candidate-set Jaccard)
+      - PlanIntersect@100   (token-plan Jaccard)
+      - SeqGain             (Stage2 - Stage1 on perturbed)
+      - PlanSwapDrop        (perturbed-query with clean-plan vs normal PAG)
     """
     dataset_name = SPLIT_TO_DATASET[split]
 
@@ -127,10 +138,26 @@ def evaluate_single(
         "n_queries": n_queries,
     }
 
+    # Output directories
+    clean_output = os.path.join(output_dir, dataset_name, "clean")
+    pert_label = f"{attack_method}_seed_{seed}"
+    pert_output = os.path.join(output_dir, dataset_name, "perturbed", pert_label)
+
+    clean_lex_dir = os.path.join(clean_output, "pag", "lex_ret")
+    clean_smt_dir = os.path.join(clean_output, "pag", "smt_ret")
+    pert_lex_dir = os.path.join(pert_output, "pag", "lex_ret")
+    pert_smt_dir = os.path.join(pert_output, "pag", "smt_ret")
+
+    # Planner token paths
+    clean_tokens_path = os.path.join(clean_output, "planner_tokens.json")
+    pert_tokens_path = os.path.join(pert_output, "planner_tokens.json")
+
+    # Plan-swapped decoding output
+    swap_smt_dir = os.path.join(pert_output, "pag_planswap", "smt_ret")
+
     if not eval_only:
         # ── 2. Run PAG on clean queries ──────────────────────────────────
         print(f"\n[RQ2] === Running PAG on CLEAN queries ({split}) ===")
-        clean_output = os.path.join(output_dir, dataset_name, "clean")
         clean_results = run_pag_pipeline(
             query_dir=clean_dir,
             output_dir=clean_output,
@@ -146,10 +173,6 @@ def evaluate_single(
         # ── 3. Run PAG on perturbed queries ────────────────────────────
         print(f"\n[RQ2] === Running PAG on PERTURBED queries "
               f"({split}, {attack_method}, seed={seed}) ===")
-        pert_label = f"{attack_method}_seed_{seed}"
-        pert_output = os.path.join(
-            output_dir, dataset_name, "perturbed", pert_label
-        )
         pert_results = run_pag_pipeline(
             query_dir=perturbed_dir,
             output_dir=pert_output,
@@ -162,44 +185,61 @@ def evaluate_single(
         )
         result["perturbed_pag_eval"] = pert_results
 
-    # ── 4. Plan-collapse analysis ────────────────────────────────────
-    try:
-        pert_label = f"{attack_method}_seed_{seed}"
-        clean_lex_dir = os.path.join(
-            output_dir, dataset_name, "clean", "pag", "lex_ret"
+        # ── 4. Extract planner tokens for PlanIntersect ────────────────
+        print(f"\n[RQ2] === Extracting planner tokens ===")
+        extract_planner_tokens(
+            query_dir=clean_dir,
+            out_path=clean_tokens_path,
+            topk=100,
+            batch_size=batch_size,
         )
-        pert_lex_dir = os.path.join(
-            output_dir, dataset_name, "perturbed", pert_label, "pag", "lex_ret"
-        )
-        clean_smt_dir = os.path.join(
-            output_dir, dataset_name, "clean", "pag", "smt_ret"
-        )
-        pert_smt_dir = os.path.join(
-            output_dir, dataset_name, "perturbed", pert_label, "pag", "smt_ret"
+        extract_planner_tokens(
+            query_dir=perturbed_dir,
+            out_path=pert_tokens_path,
+            topk=100,
+            batch_size=batch_size,
         )
 
+        # ── 5. Plan-swapped decoding (PlanSwapDrop) ────────────────────
+        # Decode perturbed queries using the lexical plan from clean queries
+        print(f"\n[RQ2] === Plan-swapped decoding ===")
+        os.makedirs(swap_smt_dir, exist_ok=True)
+        rc = run_plan_swapped_decoding(
+            query_dir=perturbed_dir,
+            smt_out_dir=swap_smt_dir,
+            swap_lex_out_dir=clean_lex_dir,
+            topk=smt_topk,
+            batch_size=batch_size * 2,
+            n_gpu=n_gpu,
+        )
+        if rc == 0:
+            swap_results = merge_and_evaluate(
+                query_dir=perturbed_dir,
+                smt_out_dir=swap_smt_dir,
+                eval_qrel_path=qrel_path,
+            )
+            result["planswap_eval"] = swap_results
+        else:
+            print(f"[RQ2] Plan-swapped decoding failed (rc={rc})")
+
+    # ── 6. Compute all metrics from run files ──────────────────────────
+    try:
+        with open(qrel_path) as f:
+            qrels = json.load(f)
+
+        # Load lexical planner runs
         clean_lex_run = load_lexical_run(clean_lex_dir, dataset_name)
         pert_lex_run = load_lexical_run(pert_lex_dir, dataset_name)
 
-        if clean_lex_run and pert_lex_run:
-            plan_stats = aggregate_plan_collapse(
-                clean_lex_run, pert_lex_run, topk=100
-            )
-            result["plan_collapse"] = plan_stats
+        # Load sequential decoder runs
+        clean_smt_run = load_sequential_run(clean_smt_dir, dataset_name)
+        pert_smt_run = load_sequential_run(pert_smt_dir, dataset_name)
 
-            # Per-query plan collapse for detailed analysis
-            per_query = candidate_overlap(clean_lex_run, pert_lex_run, topk=100)
-            pq_path = os.path.join(
-                output_dir, dataset_name, "perturbed", pert_label,
-                "plan_collapse_per_query.json"
-            )
-            os.makedirs(os.path.dirname(pq_path), exist_ok=True)
-            with open(pq_path, "w") as f:
-                json.dump(per_query, f, indent=2)
+        # Load planner tokens
+        clean_tokens = load_planner_tokens(clean_tokens_path)
+        pert_tokens = load_planner_tokens(pert_tokens_path)
 
-        # ── 5. Evaluate lexical planner runs with qrels ────────────────
-        with open(qrel_path) as f:
-            qrels = json.load(f)
+        # --- Retrieval metrics (Table 1) ---
 
         if clean_lex_run:
             result["clean_lex_metrics"] = compute_retrieval_metrics(
@@ -209,11 +249,6 @@ def evaluate_single(
             result["perturbed_lex_metrics"] = compute_retrieval_metrics(
                 pert_lex_run, qrels, k=10
             )
-
-        # Load sequential runs for recovery analysis
-        clean_smt_run = load_sequential_run(clean_smt_dir, dataset_name)
-        pert_smt_run = load_sequential_run(pert_smt_dir, dataset_name)
-
         if clean_smt_run:
             result["clean_smt_metrics"] = compute_retrieval_metrics(
                 clean_smt_run, qrels, k=10
@@ -223,7 +258,43 @@ def evaluate_single(
                 pert_smt_run, qrels, k=10
             )
 
-        # ── 6. Sequential recovery delta ──────────────────────────────
+        # --- Plan-collapse metrics (Table 2) ---
+
+        if clean_lex_run and pert_lex_run:
+            plan_stats = aggregate_plan_collapse(
+                clean_lex_run, pert_lex_run, topk=100,
+                clean_planner_tokens=clean_tokens or None,
+                perturbed_planner_tokens=pert_tokens or None,
+            )
+            result["plan_collapse"] = plan_stats
+
+            # Per-query plan collapse for detailed analysis
+            per_query = candidate_overlap(clean_lex_run, pert_lex_run, topk=100)
+
+            # Add per-query PlanIntersect if tokens available
+            if clean_tokens and pert_tokens:
+                pi_per_query = plan_intersect(clean_tokens, pert_tokens, topk=100)
+                for qid in per_query:
+                    if qid in pi_per_query:
+                        per_query[qid]["plan_intersect"] = pi_per_query[qid]["jaccard"]
+
+            pq_path = os.path.join(pert_output, "plan_collapse_per_query.json")
+            os.makedirs(os.path.dirname(pq_path), exist_ok=True)
+            with open(pq_path, "w") as f:
+                json.dump(per_query, f, indent=2)
+
+        # --- SeqGain: marginal gain of Stage 2 over Stage 1 on perturbed ---
+
+        if "perturbed_lex_metrics" in result and "perturbed_smt_metrics" in result:
+            seq_gain = {}
+            for m in ["NDCG@10", "MRR@10"]:
+                pert_smt_val = result["perturbed_smt_metrics"].get(m, 0)
+                pert_lex_val = result["perturbed_lex_metrics"].get(m, 0)
+                seq_gain[m] = pert_smt_val - pert_lex_val
+            result["seq_gain"] = seq_gain
+
+        # --- Sequential recovery delta ---
+
         if all(k in result for k in [
             "clean_lex_metrics", "perturbed_lex_metrics",
             "clean_smt_metrics", "perturbed_smt_metrics"
@@ -237,8 +308,26 @@ def evaluate_single(
                 )
                 result[f"recovery_delta_{metric_name}"] = delta
 
+        # --- PlanSwapDrop ---
+        # Drop = normal_PAG_on_perturbed - planswap_PAG_on_perturbed
+        # Positive means using the wrong plan hurts.
+
+        swap_smt_run = load_sequential_run(swap_smt_dir, dataset_name)
+        if swap_smt_run:
+            result["planswap_smt_metrics"] = compute_retrieval_metrics(
+                swap_smt_run, qrels, k=10
+            )
+
+        if "perturbed_smt_metrics" in result and "planswap_smt_metrics" in result:
+            planswap_drop = {}
+            for m in ["NDCG@10", "MRR@10"]:
+                normal_val = result["perturbed_smt_metrics"].get(m, 0)
+                swap_val = result["planswap_smt_metrics"].get(m, 0)
+                planswap_drop[m] = normal_val - swap_val
+            result["planswap_drop"] = planswap_drop
+
     except Exception as e:
-        print(f"[RQ2] Warning: plan-collapse analysis failed: {e}")
+        print(f"[RQ2] Warning: metric computation failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -269,31 +358,50 @@ def write_summary(results: List[Dict], output_dir: str):
             "n_queries": r.get("n_queries"),
         }
 
-        # Lexical planner metrics
+        # Retrieval metrics (Table 1)
         for prefix, key in [
             ("clean_lex", "clean_lex_metrics"),
             ("pert_lex", "perturbed_lex_metrics"),
             ("clean_smt", "clean_smt_metrics"),
             ("pert_smt", "perturbed_smt_metrics"),
+            ("swap_smt", "planswap_smt_metrics"),
         ]:
             metrics = r.get(key, {})
             for m in ["NDCG@10", "MRR@10"]:
                 row[f"{prefix}_{m}"] = metrics.get(m)
 
-        # Deltas
+        # Deltas (Table 1)
         for m in ["NDCG@10", "MRR@10"]:
-            # Absolute drops
-            cl = row.get(f"clean_smt_{m}")
-            pl = row.get(f"pert_smt_{m}")
+            # Absolute drops for lexical planner
+            cl = row.get(f"clean_lex_{m}")
+            pl = row.get(f"pert_lex_{m}")
             if cl is not None and pl is not None:
-                row[f"delta_smt_{m}"] = cl - pl
+                row[f"delta_lex_{m}"] = cl - pl
+
+            # Absolute drops for end-to-end PAG
+            cs = row.get(f"clean_smt_{m}")
+            ps = row.get(f"pert_smt_{m}")
+            if cs is not None and ps is not None:
+                row[f"delta_smt_{m}"] = cs - ps
+
             row[f"recovery_delta_{m}"] = r.get(f"recovery_delta_{m}")
 
-        # Plan collapse
+        # Plan collapse (Table 2)
         pc = r.get("plan_collapse", {})
-        row["avg_jaccard@100"] = pc.get("avg_jaccard@100")
-        row["avg_size_ratio"] = pc.get("avg_size_ratio")
+        row["CandOverlap@100"] = pc.get("avg_jaccard@100")
+        row["PlanIntersect@100"] = pc.get("avg_plan_intersect@100")
         row["avg_rank_correlation@100"] = pc.get("avg_rank_correlation@100")
+        row["avg_size_ratio"] = pc.get("avg_size_ratio")
+
+        # SeqGain (Table 2)
+        sg = r.get("seq_gain", {})
+        row["SeqGain_MRR@10"] = sg.get("MRR@10")
+        row["SeqGain_NDCG@10"] = sg.get("NDCG@10")
+
+        # PlanSwapDrop (Table 2)
+        psd = r.get("planswap_drop", {})
+        row["PlanSwapDrop_MRR@10"] = psd.get("MRR@10")
+        row["PlanSwapDrop_NDCG@10"] = psd.get("NDCG@10")
 
         csv_rows.append(row)
 

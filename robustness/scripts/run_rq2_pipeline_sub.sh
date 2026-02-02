@@ -7,9 +7,9 @@
 #SBATCH -p gpu
 #SBATCH --gres=gpu:1
 #SBATCH --partition=gpu_h100
-#SBATCH --time=00-04:00:00
-#SBATCH --output=experiments/%x-%j.out
-#SBATCH --error=experiments/%x-%j.err
+#SBATCH --time=00-06:00:00
+#SBATCH --output=experiments/RQ2_robustness/%x-%j.out
+#SBATCH --error=experiments/RQ2_robustness/%x-%j.err
 
 # ──────────────────────────────────────────────────────────────────────
 # RQ2 single-job runner

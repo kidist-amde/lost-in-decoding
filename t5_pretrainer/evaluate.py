@@ -214,7 +214,10 @@ def lexical_condition_decode_doc(model,
                     print(f"smtid: {smtid} not in smtid_to_docid")
                 else:
                     for docid in smtid_to_docids[smtid]:
-                        out_qid_to_rankdata[qid][docid] = rel_score * max_new_token
+                        # out_qid_to_rankdata[qid][docid] = rel_score * max_new_token
+                        # FOR ABLATION STUDY: without multiplying by max_new_token
+                        out_qid_to_rankdata[qid][docid] = rel_score
+
                     
     out_path = os.path.join(out_dir, f"run_{local_rank}.json")
     with open(out_path, "w") as fout:
@@ -268,7 +271,9 @@ def lexical_inc_decode_doc(model,
                     print(f"smtid: {smtid} not in smtid_to_docid")
                 else:
                     for docid in smtid_to_docids[smtid]:
-                        out_qid_to_rankdata[qid][docid] = rel_score * max_new_token
+                        # out_qid_to_rankdata[qid][docid] = rel_score * max_new_token
+                        # FOR ABLATION STUDY: without multiplying by max_new_token
+                        out_qid_to_rankdata[qid][docid] = rel_score
                     
     out_path = os.path.join(out_dir, f"run_{local_rank}.json")
     with open(out_path, "w") as fout:
@@ -325,8 +330,9 @@ def lexical_tmp_rescore_decode_doc(model,
                     print(f"smtid: {smtid} not in smtid_to_docid")
                 else:
                     for docid in smtid_to_docids[smtid]:
-                        out_qid_to_rankdata[qid][docid] = rel_score + lex_qid_to_smtid_to_score[str(qid)][str(smtid)]
-                        #out_qid_to_rankdata[qid][docid] = rel_score 
+                        # out_qid_to_rankdata[qid][docid] = rel_score + lex_qid_to_smtid_to_score[str(qid)][str(smtid)]
+                        ## FOR ABLATION STUDY: without multiplying by max_new_token
+                        out_qid_to_rankdata[qid][docid] = rel_score
                     
     out_path = os.path.join(out_dir, f"run_{local_rank}.json")
     with open(out_path, "w") as fout:
@@ -720,7 +726,12 @@ def term_encoder_parallel_retrieve_2(args):
         # merge
         qid_to_rankdata = {}
         sub_paths = [p for p in os.listdir(out_dir) if "run" in p]
-        assert len(sub_paths) == torch.cuda.device_count()
+        if len(sub_paths) == 0:
+            raise RuntimeError(f"no run files found in {out_dir}")
+        # Allow merging when the number of run shards doesn't match visible GPUs
+        if len(sub_paths) != torch.cuda.device_count():
+            print(f"warning: found {len(sub_paths)} run shards, "
+                  f"but torch.cuda.device_count()={torch.cuda.device_count()}")
         for sub_path in sub_paths:
             with open(os.path.join(out_dir, sub_path)) as fin:
                 sub_qid_to_rankdata = ujson.load(fin)
@@ -1081,7 +1092,7 @@ def constrained_beam_search_for_qid_rankdata_2(args):
         # merge
         qid_to_rankdata = {}
         sub_paths = [p for p in os.listdir(out_dir) if "run" in p]
-        assert len(sub_paths) == torch.cuda.device_count()
+        assert len(sub_paths) > 0, f"No run files found in {out_dir}"
         for sub_path in sub_paths:
             with open(os.path.join(out_dir, sub_path)) as fin:
                 sub_qid_to_rankdata = ujson.load(fin)
@@ -1117,7 +1128,7 @@ def constrained_beam_search_for_train_queries_2(args):
     qid_to_smtid_rankdata = {}
     sub_paths = [p for p in os.listdir(out_dir) if "qid_smtid_rankdata" in p]
     print("out_dir: ", [p for p in os.listdir(out_dir)], out_dir)
-    assert len(sub_paths) == torch.cuda.device_count(), (len(sub_paths), torch.cuda.device_count())
+    assert len(sub_paths) > 0, f"No qid_smtid_rankdata files found in {out_dir}"
     for sub_path in sub_paths:
         with open(os.path.join(out_dir, sub_path)) as fin:
             sub_qid_to_smtid_rankdata = ujson.load(fin)
@@ -1538,7 +1549,7 @@ def lexical_constrained_retrieve_and_rerank_3(args):
         # merge
         qid_to_rankdata = {}
         sub_paths = [p for p in os.listdir(out_dir) if "run" in p]
-        assert len(sub_paths) == torch.cuda.device_count()
+        assert len(sub_paths) > 0, f"No run files found in {out_dir}"
         for sub_path in sub_paths:
             with open(os.path.join(out_dir, sub_path)) as fin:
                 sub_qid_to_rankdata = ujson.load(fin)
@@ -1771,7 +1782,7 @@ def lexical_ripor_for_dense_pretrained_merge_runs(args):
         # merge
         qid_to_rankdata = {}
         sub_paths = [p for p in os.listdir(out_dir) if "run" in p]
-        assert len(sub_paths) == torch.cuda.device_count()
+        assert len(sub_paths) > 0, f"No run files found in {out_dir}"
         for sub_path in sub_paths:
             with open(os.path.join(out_dir, sub_path)) as fin:
                 sub_qid_to_rankdata = ujson.load(fin)
