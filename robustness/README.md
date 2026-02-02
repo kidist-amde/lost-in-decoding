@@ -468,7 +468,7 @@ bash robustness/scripts/run_rq2_pipeline.sh dl19
 
 ### Step 2: Aggregate Over Seeds (Mean ± Std)
 
-After all seeds complete, aggregate the per-seed rows into mean ± std tables:
+After all seeds complete, aggregate the per-seed rows into mean ± std tables (no GPU needed):
 
 ```bash
 # Single attack method
@@ -507,7 +507,7 @@ experiments/RQ2_robustness/TREC_DL_2019/
 └── perturbed/mispelling_seed_2026/pag/.../run.json
 ```
 
-Only `summary.csv` (a derived summary) gets overwritten. It can be rebuilt at any time from the `run.json` files using `--eval_only`. Before aggregating, re-consolidate all results:
+Only `summary.csv` (a derived summary) gets overwritten. It can be rebuilt at any time from the `run.json` files using `--eval_only`. Before aggregating, re-consolidate all results (no GPU needed):
 
 **Single attack method (5 seeds):**
 
