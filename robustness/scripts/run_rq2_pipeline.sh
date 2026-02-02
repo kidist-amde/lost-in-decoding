@@ -36,11 +36,18 @@ fi
 
 seed_list=(1999 5 27 2016 2026)
 
+LOG_BASE="experiments/RQ2_robustness/logs"
+
 for split in "${split_list[@]}"; do
+    log_dir="${LOG_BASE}/${split}"
+    mkdir -p "$log_dir"
     for attack_method in "${attack_method_list[@]}"; do
         for seed in "${seed_list[@]}"; do
             echo "Submitting: split=$split attack=$attack_method seed=$seed"
-            sbatch robustness/scripts/run_rq2_pipeline_sub.sh \
+            sbatch \
+                --output="${log_dir}/%x-${attack_method}-s${seed}-%j.out" \
+                --error="${log_dir}/%x-${attack_method}-s${seed}-%j.err" \
+                robustness/scripts/run_rq2_pipeline_sub.sh \
                 "$split" "$attack_method" "$seed"
         done
     done

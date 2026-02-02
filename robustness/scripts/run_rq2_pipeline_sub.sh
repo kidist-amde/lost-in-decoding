@@ -8,8 +8,8 @@
 #SBATCH --gres=gpu:1
 #SBATCH --partition=gpu_h100
 #SBATCH --time=00-06:00:00
-#SBATCH --output=experiments/RQ2_robustness/%x-%j.out
-#SBATCH --error=experiments/RQ2_robustness/%x-%j.err
+# NOTE: --output and --error are set by the launcher script
+# (run_rq2_pipeline.sh) so that logs are organized per split.
 
 # ──────────────────────────────────────────────────────────────────────
 # RQ2 single-job runner
@@ -32,11 +32,16 @@ split=$1
 attack_method=$2
 seed=$3
 
+# Derive a unique MASTER_PORT from SLURM_JOB_ID to avoid port conflicts
+# when multiple jobs land on the same node.
+export MASTER_PORT=$(( 29500 + (SLURM_JOB_ID % 10000) ))
+
 echo "========================================"
 echo "RQ2 PAG Robustness Evaluation"
 echo "  split:         $split"
 echo "  attack_method: $attack_method"
 echo "  seed:          $seed"
+echo "  MASTER_PORT:   $MASTER_PORT"
 echo "========================================"
 
 python -m robustness.evaluation.rq2 \

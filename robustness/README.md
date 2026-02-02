@@ -20,7 +20,7 @@ This package evaluates PAG (Planning Ahead in Generative Retrieval) and dense re
    - [Evaluate-Only Mode (Skip Inference)](#evaluate-only-mode)
    - [Result Consolidation](#result-consolidation)
    - [Output Structure](#output-structure)
-5. [Running All 5 Seeds and Reporting Mean ± Std (Example: DL19)](#running-all-5-seeds-and-reporting-mean--std-example-dl19)
+5. [End-to-End Example: DL19 with Mean ± Std](#end-to-end-example-dl19-with-mean--std)
 6. [Query Variation Generation](#query-variation-generation)
 7. [Dense Retrieval Attack Evaluation (RQ3)](#dense-retrieval-attack-evaluation)
 8. [Configuration Reference](#configuration-reference)
@@ -296,7 +296,19 @@ bash robustness/scripts/run_rq2_pipeline.sh all all5
 #SBATCH --time=00-06:00:00
 ```
 
-Logs are written to `experiments/RQ2_robustness/rq2_pag_robust-<JOBID>.{out,err}`.
+Logs are organized per split under `experiments/RQ2_robustness/logs/`:
+
+```
+experiments/RQ2_robustness/logs/
+├── dl19/
+│   ├── rq2_pag_robust-mispelling-s1999-<JOBID>.out
+│   ├── rq2_pag_robust-mispelling-s1999-<JOBID>.err
+│   └── ...
+├── dl20/
+│   └── ...
+└── dev/
+    └── ...
+```
 
 ### Evaluate-Only Mode
 
@@ -397,7 +409,10 @@ experiments/RQ2_robustness/
 ├── MSMARCO/                                              # Same structure (dev split)
 │   └── ...
 │
-└── rq2_pag_robust-<JOBID>.{out,err}                      # SLURM job logs
+└── logs/                                                    # SLURM job logs (per split)
+    ├── dl19/rq2_pag_robust-<attack>-s<seed>-<JOBID>.{out,err}
+    ├── dl20/...
+    └── dev/...
 ```
 
 **Key output files**:
@@ -430,19 +445,20 @@ PlanSwapDrop_MRR@10, PlanSwapDrop_NDCG@10
 
 ---
 
-## Running All 5 Seeds and Reporting Mean ± Std (Example: DL19)
+## End-to-End Example: DL19 with Mean ± Std
 
-To produce paper-ready results with variance estimates, run all 5 seeds for a given (split, attack) pair and then aggregate.
+This section walks through the full workflow — run inference, rebuild the summary, and produce paper-ready tables — using DL19 as an example.
 
-### Step 1: Run All 5 Seeds
+### Step 1: Run Inference
 
-**Option A — Single process (sequential, no SLURM):**
+Pick **one** of the two options below.
+
+**Option A — Sequential (no SLURM, single GPU):**
 
 ```bash
 conda activate pag-env
 cd /gpfs/work4/0/prjs1037/dpo-exp/pag-repro
 
-# All 5 seeds for DL19 + misspelling (seeds: 1999, 5, 27, 2016, 2026)
 python -m robustness.evaluation.rq2 \
     --split dl19 \
     --attack_method mispelling \
@@ -451,55 +467,25 @@ python -m robustness.evaluation.rq2 \
     --batch_size 8
 ```
 
-The `--seed all` flag loops over all 5 seeds sequentially. Each seed's results are appended to `experiments/RQ2_robustness/summary.csv`.
+`--seed all` loops over all 5 seeds (1999, 5, 27, 2016, 2026) sequentially and writes one combined `summary.csv`.
 
-**Option B — SLURM (parallel, one job per seed):**
+**Option B — Parallel SLURM (one job per seed):**
 
 ```bash
-# Submits 5 jobs (one per seed) for DL19 + misspelling
+# 1 attack × 5 seeds = 5 jobs
 bash robustness/scripts/run_rq2_pipeline.sh dl19 mispelling
-```
 
-To run all 5 attack methods × 5 seeds = 25 jobs:
-
-```bash
+# All 5 attacks × 5 seeds = 25 jobs
 bash robustness/scripts/run_rq2_pipeline.sh dl19
 ```
 
-### Step 2: Aggregate Over Seeds (Mean ± Std)
+### Step 2: Rebuild summary.csv (required after SLURM, optional after sequential)
 
-After all seeds complete, aggregate the per-seed rows into mean ± std tables (no GPU needed):
-
-```bash
-# Single attack method
-python -m robustness.evaluation.aggregate_results \
-    --splits dl19 \
-    --attacks mispelling \
-    --latex
-
-# All 5 attack methods
-python -m robustness.evaluation.aggregate_results \
-    --splits dl19 \
-    --attacks mispelling ordering synonym paraphrase naturality \
-    --latex
-```
-
-This reads `experiments/RQ2_robustness/summary.csv`, groups rows by (split, attack_method), and computes sample mean and standard deviation over the 5 seeds. It prints three tables:
-
-- **Table 1**: Retrieval performance (S1-NDCG@10, S1-MRR@10, S2-NDCG@10, S2-MRR@10) with deltas, formatted as `mean±std`
-- **Table 2**: Plan stability (CandOverlap@100, PlanIntersect@100, SeqGain, PlanSwapDrop, collapse rate) as `mean±std`
-- **Table 3**: Distributional statistics (percentiles) for CandOverlap and TokJaccard
-
-With `--latex`, it additionally prints LaTeX-formatted values (e.g. `0.6543$\pm$0.0123`) ready for copy-paste into paper tables.
-
-### Step 2b: Consolidation After Parallel SLURM Jobs
-
-When seeds ran as separate SLURM jobs, each job writes its own 1-row `summary.csv` (overwriting the previous). **No inference data is lost.** The actual inference outputs are saved as individual `run.json` files per seed in separate directories that never conflict:
+Parallel SLURM jobs each write their own 1-row `summary.csv`, overwriting the previous. The actual inference outputs (`run.json` per seed) are stored in separate directories and are never lost:
 
 ```
 experiments/RQ2_robustness/TREC_DL_2019/
-├── clean/pag/lex_ret/TREC_DL_2019/run.json       # Clean Stage 1 (shared)
-├── clean/pag/smt_ret/TREC_DL_2019/run.json       # Clean Stage 2 (shared)
+├── clean/pag/{lex,smt}_ret/TREC_DL_2019/run.json   # shared across seeds
 ├── perturbed/mispelling_seed_1999/pag/.../run.json
 ├── perturbed/mispelling_seed_5/pag/.../run.json
 ├── perturbed/mispelling_seed_27/pag/.../run.json
@@ -507,51 +493,46 @@ experiments/RQ2_robustness/TREC_DL_2019/
 └── perturbed/mispelling_seed_2026/pag/.../run.json
 ```
 
-Only `summary.csv` (a derived summary) gets overwritten. It can be rebuilt at any time from the `run.json` files using `--eval_only`. Before aggregating, re-consolidate all results (no GPU needed):
-
-**Single attack method (5 seeds):**
+Rebuild `summary.csv` from these run files (no GPU needed):
 
 ```bash
 conda activate pag-env
 cd /gpfs/work4/0/prjs1037/dpo-exp/pag-repro
 
+# Single attack (5 seeds)
 python -m robustness.evaluation.rq2 \
-    --split dl19 \
-    --attack_method mispelling \
-    --seed all \
-    --eval_only
+    --split dl19 --attack_method mispelling --seed all --eval_only
 
-# Then aggregate
+# All 5 attacks × 5 seeds (25 rows)
+python -m robustness.evaluation.rq2 \
+    --split dl19 --attack_method all --seed all --eval_only
+```
+
+If you used Option A (sequential) above, `summary.csv` is already correct and you can skip this step.
+
+### Step 3: Aggregate over seeds (Mean ± Std)
+
+```bash
+# Single attack
 python -m robustness.evaluation.aggregate_results \
     --splits dl19 \
     --attacks mispelling \
     --latex
-```
 
-**All 5 attack methods × 5 seeds (25 jobs):**
-
-When you ran all 25 jobs in parallel (`bash robustness/scripts/run_rq2_pipeline.sh dl19`), the same overwrite issue applies — all 25 jobs write to the same `summary.csv`. After all jobs finish, consolidate everything in one command:
-
-```bash
-conda activate pag-env
-cd /gpfs/work4/0/prjs1037/dpo-exp/pag-repro
-
-python -m robustness.evaluation.rq2 \
-    --split dl19 \
-    --attack_method all \
-    --seed all \
-    --eval_only
-
-# Then aggregate over all 5 attack methods
+# All 5 attacks
 python -m robustness.evaluation.aggregate_results \
     --splits dl19 \
     --attacks mispelling ordering synonym paraphrase naturality \
     --latex
 ```
 
-This rebuilds `summary.csv` with all 25 rows (5 attacks × 5 seeds), then produces mean ± std tables for each attack method.
+This reads `summary.csv`, groups by (split, attack_method), and computes mean ± std over the 5 seeds. It prints three tables:
 
-The `--eval_only` flag skips GPU inference and only recomputes metrics from existing `run.json` files, rebuilding the combined `summary.csv` with all seed rows.
+- **Table 1**: Retrieval performance (S1-NDCG@10, S1-MRR@10, S2-NDCG@10, S2-MRR@10) with deltas
+- **Table 2**: Plan stability (CandOverlap@100, PlanIntersect@100, SeqGain, PlanSwapDrop, collapse rate)
+- **Table 3**: Distributional statistics (percentiles) for CandOverlap and TokJaccard
+
+With `--latex`, values are formatted as `0.6543$\pm$0.0123` for direct copy-paste into paper tables.
 
 ---
 
@@ -761,11 +742,15 @@ conda activate pag-env
 
 ### SLURM jobs overwrite `summary.csv`
 
-Each parallel SLURM job writes its own 1-row `summary.csv`, overwriting the previous one. This is expected. After all jobs complete, run the [consolidation step](#result-consolidation) to produce the combined summary.
+Each parallel SLURM job writes its own 1-row `summary.csv`, overwriting the previous one. This is expected — the `run.json` inference outputs are stored in per-seed directories and are never lost. After all jobs complete, rebuild the combined summary with `--eval_only` (see [Step 2 in the example](#step-2-rebuild-summarycsv-required-after-slurm-optional-after-sequential)).
 
 ### Stage 2 shard merge assertion error
 
-The upstream `t5_pretrainer` has an assertion `len(sub_paths) == torch.cuda.device_count()` that can fail when visible GPUs differ from `nproc_per_node`. The `merge_and_evaluate()` function in `pag_inference.py` reimplements the merge logic without this assertion.
+The upstream `t5_pretrainer` has an assertion `len(sub_paths) == torch.cuda.device_count()` that can fail when visible GPUs differ from `nproc_per_node`. The `merge_and_evaluate()` function in `pag_inference.py` reimplements the merge logic without this assertion. The merge is protected by a file lock (`fcntl.flock`) so concurrent jobs sharing the same output directory will not race.
+
+### Port conflicts when multiple jobs share a node
+
+Each SLURM job derives a unique `MASTER_PORT` from `$SLURM_JOB_ID` (set in `run_rq2_pipeline_sub.sh`) to avoid `Address already in use` errors when `torch.distributed.launch` jobs land on the same node.
 
 ### Dataset name not recognised
 

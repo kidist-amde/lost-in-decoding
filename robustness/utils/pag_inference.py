@@ -10,6 +10,7 @@ points so that all model-loading, tokenisation and decoding logic is reused
 without duplication.
 """
 
+import fcntl
 import glob
 import json
 import os
@@ -191,34 +192,70 @@ def _merge_run_shards(out_dir: str) -> Dict:
     ``lexical_constrained_retrieve_and_rerank_3`` that avoids the
     ``assert len(sub_paths) == torch.cuda.device_count()`` guard (which
     can fail when the number of visible GPUs differs from ``nproc_per_node``).
+
+    Uses a file lock to prevent concurrent jobs from racing on the same
+    output directory (e.g. the shared clean-stage directory).
     """
-    # Find all shard files
-    shard_paths = sorted(glob.glob(os.path.join(out_dir, "run_*.json")))
-    if not shard_paths:
-        print(f"[merge] No run shards found in {out_dir}")
-        return {}
-
-    qid_to_rankdata: Dict = {}
-    for shard in shard_paths:
-        with open(shard) as f:
-            sub = json.load(f)
-        for qid, rankdata in sub.items():
-            if qid not in qid_to_rankdata:
-                qid_to_rankdata[qid] = rankdata
-            else:
-                qid_to_rankdata[qid].update(rankdata)
-
     merged_path = os.path.join(out_dir, "run.json")
-    with open(merged_path, "w") as f:
-        json.dump(qid_to_rankdata, f)
+    lock_path = os.path.join(out_dir, ".merge.lock")
+    os.makedirs(out_dir, exist_ok=True)
 
-    # Clean up shards
-    for shard in shard_paths:
-        os.remove(shard)
+    lock_fd = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
-    print(f"[merge] Merged {len(shard_paths)} shards -> {merged_path} "
-          f"({len(qid_to_rankdata)} queries)")
-    return qid_to_rankdata
+        # Re-check after acquiring lock: another process may have finished.
+        if os.path.exists(merged_path):
+            shard_paths = sorted(
+                glob.glob(os.path.join(out_dir, "run_*.json"))
+            )
+            if not shard_paths:
+                print(f"[merge] run.json already exists in {out_dir}, "
+                      f"no shards remaining — skipping merge.")
+                with open(merged_path) as f:
+                    return json.load(f)
+
+        # Find all shard files
+        shard_paths = sorted(
+            glob.glob(os.path.join(out_dir, "run_*.json"))
+        )
+        if not shard_paths:
+            print(f"[merge] No run shards found in {out_dir}")
+            if os.path.exists(merged_path):
+                with open(merged_path) as f:
+                    return json.load(f)
+            return {}
+
+        qid_to_rankdata: Dict = {}
+        for shard in shard_paths:
+            try:
+                with open(shard) as f:
+                    sub = json.load(f)
+            except FileNotFoundError:
+                print(f"[merge] Missing shard (skipping): {shard}")
+                continue
+            for qid, rankdata in sub.items():
+                if qid not in qid_to_rankdata:
+                    qid_to_rankdata[qid] = rankdata
+                else:
+                    qid_to_rankdata[qid].update(rankdata)
+
+        with open(merged_path, "w") as f:
+            json.dump(qid_to_rankdata, f)
+
+        # Clean up shards
+        for shard in shard_paths:
+            try:
+                os.remove(shard)
+            except FileNotFoundError:
+                pass
+
+        print(f"[merge] Merged {len(shard_paths)} shards -> {merged_path} "
+              f"({len(qid_to_rankdata)} queries)")
+        return qid_to_rankdata
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()
 
 
 def merge_and_evaluate(

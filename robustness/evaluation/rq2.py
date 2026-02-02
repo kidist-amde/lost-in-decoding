@@ -160,18 +160,32 @@ def evaluate_single(
 
     if not eval_only:
         # ── 2. Run PAG on clean queries ──────────────────────────────────
-        print(f"\n[RQ2] === Running PAG on CLEAN queries ({split}) ===")
-        clean_results = run_pag_pipeline(
-            query_dir=clean_dir,
-            output_dir=clean_output,
-            eval_qrel_path=qrel_path,
-            label="pag",
-            lex_topk=lex_topk,
-            smt_topk=smt_topk,
-            batch_size=batch_size,
-            n_gpu=n_gpu,
+        # Clean outputs are shared across all (attack, seed) combos for the
+        # same split.  Skip if the merged run.json already exists to avoid
+        # races when many SLURM jobs target the same split concurrently.
+        clean_smt_run_path = os.path.join(
+            clean_smt_dir, dataset_name, "run.json"
         )
-        result["clean_pag_eval"] = clean_results
+        clean_lex_run_path = os.path.join(
+            clean_lex_dir, dataset_name, "run.json"
+        )
+        if (os.path.exists(clean_smt_run_path)
+                and os.path.exists(clean_lex_run_path)):
+            print(f"\n[RQ2] Clean-stage outputs already exist for {split}, "
+                  f"skipping inference.")
+        else:
+            print(f"\n[RQ2] === Running PAG on CLEAN queries ({split}) ===")
+            clean_results = run_pag_pipeline(
+                query_dir=clean_dir,
+                output_dir=clean_output,
+                eval_qrel_path=qrel_path,
+                label="pag",
+                lex_topk=lex_topk,
+                smt_topk=smt_topk,
+                batch_size=batch_size,
+                n_gpu=n_gpu,
+            )
+            result["clean_pag_eval"] = clean_results
 
         # ── 3. Run PAG on perturbed queries ────────────────────────────
         print(f"\n[RQ2] === Running PAG on PERTURBED queries "
@@ -190,12 +204,15 @@ def evaluate_single(
 
         # ── 4. Extract planner tokens for PlanIntersect ────────────────
         print(f"\n[RQ2] === Extracting planner tokens ===")
-        extract_planner_tokens(
-            query_dir=clean_dir,
-            out_path=clean_tokens_path,
-            topk=100,
-            batch_size=batch_size,
-        )
+        if os.path.exists(clean_tokens_path):
+            print(f"[RQ2] Clean planner tokens already exist, skipping.")
+        else:
+            extract_planner_tokens(
+                query_dir=clean_dir,
+                out_path=clean_tokens_path,
+                topk=100,
+                batch_size=batch_size,
+            )
         extract_planner_tokens(
             query_dir=perturbed_dir,
             out_path=pert_tokens_path,
@@ -425,12 +442,13 @@ def evaluate_single(
 # Summary writing
 # ---------------------------------------------------------------------------
 
-def write_summary(results: List[Dict], output_dir: str):
-    """Write summary.json and summary.csv."""
+def write_summary(results: List[Dict], output_dir: str, split_tag: str | None = None):
+    """Write summary.json and summary.csv (optionally split-tagged)."""
     os.makedirs(output_dir, exist_ok=True)
 
     # JSON
-    summary_json = os.path.join(output_dir, "summary.json")
+    suffix = f"_{split_tag}" if split_tag and split_tag != "all" else ""
+    summary_json = os.path.join(output_dir, f"summary{suffix}.json")
     with open(summary_json, "w") as f:
         json.dump(results, f, indent=2)
     print(f"[RQ2] Wrote {summary_json}")
@@ -510,8 +528,15 @@ def write_summary(results: List[Dict], output_dir: str):
         csv_rows.append(row)
 
     if csv_rows:
-        summary_csv = os.path.join(output_dir, "summary.csv")
-        fieldnames = list(csv_rows[0].keys())
+        summary_csv = os.path.join(output_dir, f"summary{suffix}.csv")
+        # Union of keys across rows to avoid missing-field errors.
+        fieldnames = []
+        seen = set()
+        for row in csv_rows:
+            for k in row.keys():
+                if k not in seen:
+                    seen.add(k)
+                    fieldnames.append(k)
         with open(summary_csv, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -635,10 +660,10 @@ def main():
                 all_results.append(result)
 
                 # Write intermediate summary
-                write_summary(all_results, args.output_dir)
+                write_summary(all_results, args.output_dir, args.split)
 
     # Final summary
-    write_summary(all_results, args.output_dir)
+    write_summary(all_results, args.output_dir, args.split)
     print(f"\n[RQ2] All experiments complete. Results in {args.output_dir}/")
 
 
