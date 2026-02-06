@@ -1,5 +1,5 @@
 [![SIGIR 2026](https://img.shields.io/badge/SIGIR-2026-blue)](#)
-[![Submission](https://img.shields.io/badge/submission-%23XXX-informational)](#)
+[![Submission](https://img.shields.io/badge/submission-298-informational)](#)
 [![License](https://img.shields.io/badge/license-Apache%202.0-lightgrey)](LICENSE)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97-Hugging%20Face-yellow)](#)
 

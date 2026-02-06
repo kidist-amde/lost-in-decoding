@@ -7,7 +7,7 @@
 #SBATCH -p gpu
 #SBATCH --gres=gpu:1
 #SBATCH --partition=gpu_h100
-#SBATCH --time=00-06:00:00
+#SBATCH --time=01-06:00:00
 # NOTE: --output and --error are set by the launcher script
 # (run_rq2_pipeline.sh) so that logs are organized per split.
 

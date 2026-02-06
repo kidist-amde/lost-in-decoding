@@ -1,0 +1,52 @@
+# ============================================================
+# RQ3 Trained Extension: Planner Alignment Config
+# ============================================================
+#
+# Teacher = released English PAG checkpoint (frozen)
+# Student = same init, fine-tune query-side parameters only
+#
+# Objective: KL(softmax(z_teacher/τ) || softmax(z_student/τ))
+#   over union of top-K planner tokens
+#
+# Override any key via CLI:
+#   --language fr --lr 1e-5 --temperature 2.0
+
+# --- Language ---
+language: fr
+
+# --- Model paths ---
+# Released PAG checkpoint (also used as teacher)
+pretrained_path: data/experiments-full-lexical-ripor/lexical_ripor_direct_lng_knp_seq2seq_1/checkpoint
+
+# --- Output ---
+output_dir: cross_lingual/trained_extension/checkpoints
+results_dir: cross_lingual/trained_extension/results
+
+# --- Training hyperparameters ---
+epochs: 5
+lr: 1.0e-5
+weight_decay: 0.01
+batch_size: 8
+grad_accumulation_steps: 4       # effective batch = 32
+max_length: 128
+warmup_fraction: 0.1
+max_grad_norm: 1.0
+seed: 42
+
+# --- Distillation ---
+temperature: 2.0                 # softmax temperature τ
+topk_union: 100                  # K for union of top-K planner tokens
+
+# --- Parameter freezing ---
+# Number of encoder layers to fine-tune (counting from the last).
+# T5-base has 12 encoder layers.
+#   12 = all layers trainable
+#    4 = freeze layers 0-7, train 8-11
+#    2 = freeze layers 0-9, train 10-11
+finetune_last_n_layers: 12
+freeze_decoder: true             # always freeze decoder
+
+# --- Logging & checkpointing ---
+log_interval: 50                 # log every N optimizer steps
+eval_interval: 500               # evaluate on dev every N steps
+save_interval: 1000              # save checkpoint every N steps

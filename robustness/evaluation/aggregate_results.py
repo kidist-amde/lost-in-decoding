@@ -392,13 +392,22 @@ def main():
     parser.add_argument("--latex", action="store_true", help="Also print LaTeX values.")
     args = parser.parse_args()
 
-    csv_path = os.path.join(args.results_dir, "summary.csv")
-    if not os.path.exists(csv_path):
-        print(f"Error: {csv_path} not found. Run rq2.py first.")
-        sys.exit(1)
-
-    rows = load_summary_csv(csv_path)
-    print(f"Loaded {len(rows)} result rows from {csv_path}")
+    # Load per-split summary CSVs produced by rq2.py (summary_dl19.csv, etc.)
+    # Fall back to a single summary.csv if per-split files don't exist.
+    rows = []
+    for split in args.splits:
+        split_csv = os.path.join(args.results_dir, f"summary_{split}.csv")
+        if os.path.exists(split_csv):
+            split_rows = load_summary_csv(split_csv)
+            rows.extend(split_rows)
+            print(f"Loaded {len(split_rows)} rows from {split_csv}")
+    if not rows:
+        csv_path = os.path.join(args.results_dir, "summary.csv")
+        if not os.path.exists(csv_path):
+            print(f"Error: No summary CSV found in {args.results_dir}. Run rq2.py first.")
+            sys.exit(1)
+        rows = load_summary_csv(csv_path)
+        print(f"Loaded {len(rows)} result rows from {csv_path}")
 
     # Filter to requested attacks
     rows = [r for r in rows if r["attack_method"] in args.attacks]

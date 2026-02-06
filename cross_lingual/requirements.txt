@@ -1,0 +1,17 @@
+# RQ3 Cross-lingual evaluation dependencies
+# (in addition to the base pag-env environment)
+
+# mMARCO data loading
+datasets>=2.14.0
+
+# Translation (Baseline C)
+transformers>=4.30.0
+sentencepiece>=0.1.99
+
+# Evaluation
+pytrec_eval>=0.5
+numpy>=1.24.0
+
+# Core
+torch>=2.0.0
+tqdm>=4.65.0

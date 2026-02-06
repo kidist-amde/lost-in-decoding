@@ -142,9 +142,11 @@ def run_sequential_decoding(
     else:
         eval_qrel_json = json.dumps([eval_qrel_path])
 
+    master_port = os.environ.get("MASTER_PORT", "29500")
     cmd = [
         sys.executable, "-m", "torch.distributed.launch",
         f"--nproc_per_node={n_gpu}",
+        f"--master_port={master_port}",
         "-m", "t5_pretrainer.evaluate",
         f"--pretrained_path={pretrained_path}",
         f"--out_dir={smt_out_dir}",
