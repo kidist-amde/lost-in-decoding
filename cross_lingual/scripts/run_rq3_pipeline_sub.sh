@@ -48,7 +48,7 @@ python -m cross_lingual.evaluation.rq3 \
     --batch_size 8 \
     --lex_topk 1000 \
     --smt_topk 100 \
-    --translation_model nllb \
+    --translation_model m2m100 \
     --output_dir experiments/RQ3_crosslingual
 
 echo "Done: language=$language split=$split"

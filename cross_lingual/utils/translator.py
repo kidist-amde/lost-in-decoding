@@ -175,8 +175,15 @@ class M2M100Translator(BaseTranslator):
         from transformers import M2M100ForConditionalGeneration, M2M100Tokenizer
 
         print(f"[M2M100Translator] Loading {self.MODEL_NAME}...")
-        self.tokenizer = M2M100Tokenizer.from_pretrained(self.MODEL_NAME)
-        self.model = M2M100ForConditionalGeneration.from_pretrained(self.MODEL_NAME)
+        # Use huggingface_hub to resolve the local snapshot path, avoiding
+        # the broken URL construction in transformers 4.17's cached_path().
+        try:
+            from huggingface_hub import snapshot_download
+            local_path = snapshot_download(self.MODEL_NAME)
+        except Exception:
+            local_path = self.MODEL_NAME
+        self.tokenizer = M2M100Tokenizer.from_pretrained(local_path)
+        self.model = M2M100ForConditionalGeneration.from_pretrained(local_path)
         self.model.to(self.device)
         self.model.eval()
         print(f"[M2M100Translator] Model loaded on {self.device}")

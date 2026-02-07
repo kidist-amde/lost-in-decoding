@@ -83,7 +83,8 @@ cross_lingual/
 
 ```bash
 # Via SLURM
-sbatch cross_lingual/scripts/download_mmarco.sh
+bash cross_lingual/scripts/download_mmarco.sh --force
+
 
 # Or directly
 python -m cross_lingual.data.mmarco_loader --languages fr de zh nl
@@ -103,12 +104,12 @@ sbatch cross_lingual/scripts/translate_queries.sh
 ./cross_lingual/scripts/run_rq3_pipeline.sh
 
 # Single language/split
-./cross_lingual/scripts/run_rq3_pipeline.sh fr dl19
+./cross_lingual/scripts/run_rq3_pipeline.sh fr dev
 
 # Or run directly
 python -m cross_lingual.evaluation.rq3 \
     --language fr \
-    --split dl19 \
+    --split dev \
     --n_gpu 1 \
     --batch_size 8
 ```

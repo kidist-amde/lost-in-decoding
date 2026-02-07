@@ -26,7 +26,8 @@ echo "Downloading mMARCO queries"
 echo "========================================"
 
 # Download queries for French, German, Chinese, Dutch
+# Pass through any extra args (e.g. --force)
 python -m cross_lingual.data.mmarco_loader \
-    --languages fr de zh nl
+    --languages fr de zh nl "$@"
 
 echo "Done: mMARCO queries downloaded"

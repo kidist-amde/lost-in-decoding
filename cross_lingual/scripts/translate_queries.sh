@@ -51,7 +51,7 @@ for lang in $LANGUAGES; do
         python -m cross_lingual.utils.translator \
             --language "$lang" \
             --split "$split" \
-            --model nllb \
+            --model m2m100 \
             --batch_size 32 \
             --output_dir experiments/RQ3_crosslingual/queries
     done
