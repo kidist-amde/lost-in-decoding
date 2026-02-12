@@ -2,7 +2,7 @@
 [![Submission](https://img.shields.io/badge/submission-298-informational)](#)
 [![License](https://img.shields.io/badge/license-Apache%202.0-lightgrey)](LICENSE)
 
-# Reproducing and Stress-Testing PAG in Generative Retrieval
+# Lost in Decoding? Reproducing and Stress-Testing the Look-Ahead Prior in Generative Retrieval
 
 This repository contains code and experiment pipelines for three evaluation tracks:
 
