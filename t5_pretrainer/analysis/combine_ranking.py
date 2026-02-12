@@ -56,9 +56,9 @@ def merge_run(bow_run, ripor_run, alpha=1.0):
     return new_run
 
 if __name__ == "__main__":
-    bow_run_path = "/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/experiments-full-lexical-ripor/t5-term-encoder-1-5e-4-12l/out/MSMARCO/run.json"
-    ripor_run_path = "/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/experiments-full-lexical-ripor/ripor_seq2seq_1/sub_tokenid_8_out_1000/MSMARCO/run.json"
-    qrel_path = "/home/ec2-user/quic-efs/user/hansizeng/work/data/msmarco-full/dev_qrel.json"
+    bow_run_path = "<PATH_TO_WORKDIR>/term_generative_retriever/experiments-full-lexical-ripor/t5-term-encoder-1-5e-4-12l/out/MSMARCO/run.json"
+    ripor_run_path = "<PATH_TO_WORKDIR>/term_generative_retriever/experiments-full-lexical-ripor/ripor_seq2seq_1/sub_tokenid_8_out_1000/MSMARCO/run.json"
+    qrel_path = "<PATH_TO_WORKDIR>/data/msmarco-full/dev_qrel.json"
 
     with open(bow_run_path) as fin:
         bow_run = ujson.load(fin)

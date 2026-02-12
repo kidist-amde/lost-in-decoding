@@ -1,6 +1,6 @@
 from transformers import T5ForConditionalGeneration, T5Config
 
-pretrained_path_A = "/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/experiments-splade/t5-splade-0/checkpoint/"
+pretrained_path_A = "<PATH_TO_WORKDIR>/term_generative_retriever/experiments-splade/t5-splade-0/checkpoint/"
 # Load model A
 model_A = T5ForConditionalGeneration.from_pretrained(pretrained_path_A)
 
@@ -26,5 +26,5 @@ print(state_dict_A.keys())
 
 model_B.decoder.block[-1].load_state_dict(state_dict_A)
 # Save the new model B if needed
-pretrained_path_B = "/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/experiments-splade/t5-splade-0/checkpoint_12l/"
+pretrained_path_B = "<PATH_TO_WORKDIR>/term_generative_retriever/experiments-splade/t5-splade-0/checkpoint_12l/"
 model_B.save_pretrained(pretrained_path_B)

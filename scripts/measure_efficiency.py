@@ -70,7 +70,7 @@ def cuda_timer():
 
 # ── Stage 1: simultaneous decoding ──────────────────────────────────────────
 def measure_stage1(model, lex_docid_to_smtids, device, warmup_batches=5):
-    """Return (index_mem_gb, simul_ms_per_query)."""
+    """Return (index_mem_gb, simul_gpu_ms_per_query, simul_wall_ms_per_query)."""
     model.base_model.mode = "lex_retrieval"
 
     # ── build index tensor on GPU and measure memory ─────────────────────
@@ -121,6 +121,7 @@ def measure_stage1(model, lex_docid_to_smtids, device, warmup_batches=5):
     start_ev, end_ev = cuda_timer()
     timed_queries = 0
 
+    wall_start = time.perf_counter()
     start_ev.record()
     for i, batch in enumerate(q_loader):
         if i < warmup_batches:
@@ -136,22 +137,30 @@ def measure_stage1(model, lex_docid_to_smtids, device, warmup_batches=5):
         timed_queries += bz
     end_ev.record()
     torch.cuda.synchronize(device)
+    wall_total_ms = (time.perf_counter() - wall_start) * 1000.0
 
-    total_ms = start_ev.elapsed_time(end_ev)
-    ms_per_query = total_ms / timed_queries
-    print(f"  Stage 1: {total_ms:.1f} ms total, {timed_queries} queries, "
-          f"{ms_per_query:.3f} ms/query")
+    gpu_total_ms = start_ev.elapsed_time(end_ev)
+    gpu_ms_per_query = gpu_total_ms / timed_queries
+    wall_ms_per_query = wall_total_ms / timed_queries
+    print(
+        f"  Stage 1 GPU-time: {gpu_total_ms:.1f} ms total, {timed_queries} queries, "
+        f"{gpu_ms_per_query:.3f} ms/query"
+    )
+    print(
+        f"  Stage 1 E2E wall-time: {wall_total_ms:.1f} ms total, {timed_queries} queries, "
+        f"{wall_ms_per_query:.3f} ms/query"
+    )
 
     # cleanup index from GPU
     del doc_encodings
     torch.cuda.empty_cache()
 
-    return index_mem_gb, ms_per_query
+    return index_mem_gb, gpu_ms_per_query, wall_ms_per_query
 
 
 # ── Stage 2: sequential decoding ────────────────────────────────────────────
 def measure_stage2(model, m, k, device, warmup_batches=2):
-    """Return seq_ms_per_query."""
+    """Return (seq_gpu_ms_per_query, seq_wall_ms_per_query)."""
     model.base_model.mode = "smt_retrieval"
     tokenizer = AutoTokenizer.from_pretrained(PRETRAINED)
 
@@ -223,6 +232,7 @@ def measure_stage2(model, m, k, device, warmup_batches=2):
     start_ev, end_ev = cuda_timer()
     timed_queries = 0
 
+    wall_start = time.perf_counter()
     start_ev.record()
     for i, batch in enumerate(q_loader):
         if i < warmup_batches:
@@ -255,13 +265,21 @@ def measure_stage2(model, m, k, device, warmup_batches=2):
         timed_queries += len(batch_qids)
     end_ev.record()
     torch.cuda.synchronize(device)
+    wall_total_ms = (time.perf_counter() - wall_start) * 1000.0
 
-    total_ms = start_ev.elapsed_time(end_ev)
-    ms_per_query = total_ms / timed_queries
-    print(f"  Stage 2 (k={k}): {total_ms:.1f} ms total, {timed_queries} queries, "
-          f"{ms_per_query:.3f} ms/query")
+    gpu_total_ms = start_ev.elapsed_time(end_ev)
+    gpu_ms_per_query = gpu_total_ms / timed_queries
+    wall_ms_per_query = wall_total_ms / timed_queries
+    print(
+        f"  Stage 2 (k={k}) GPU-time: {gpu_total_ms:.1f} ms total, {timed_queries} queries, "
+        f"{gpu_ms_per_query:.3f} ms/query"
+    )
+    print(
+        f"  Stage 2 (k={k}) E2E wall-time: {wall_total_ms:.1f} ms total, {timed_queries} queries, "
+        f"{wall_ms_per_query:.3f} ms/query"
+    )
 
-    return ms_per_query
+    return gpu_ms_per_query, wall_ms_per_query
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
@@ -269,6 +287,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--warmup_batches_s1", type=int, default=5)
     parser.add_argument("--warmup_batches_s2", type=int, default=2)
+    parser.add_argument("--m_values", type=int, nargs="+", default=[16, 32, 64])
+    parser.add_argument("--k_values", type=int, nargs="+", default=[10, 100])
     parser.add_argument("--out", type=str,
                         default="experiments/table3_mk_sweep/efficiency_results.json")
     args = parser.parse_args()
@@ -285,7 +305,7 @@ def main():
 
     results = {}
 
-    for m in [16, 32, 64]:
+    for m in args.m_values:
         print(f"\n{'='*60}")
         print(f" m = {m}")
         print(f"{'='*60}")
@@ -299,24 +319,26 @@ def main():
 
         # ── Stage 1 ─────────────────────────────────────────────────
         print("\n  --- Stage 1: Simultaneous Decoding ---")
-        index_mem_gb, simul_ms = measure_stage1(
+        index_mem_gb, simul_gpu_ms, simul_wall_ms = measure_stage1(
             model, lex_docid_to_smtids, device,
             warmup_batches=args.warmup_batches_s1,
         )
 
         entry = {
             "index_mem_gb": round(index_mem_gb, 3),
-            "simul_ql_ms": round(simul_ms, 3),
+            "simul_gpu_ql_ms": round(simul_gpu_ms, 3),
+            "simul_wall_ql_ms": round(simul_wall_ms, 3),
         }
 
         # ── Stage 2 for each k ──────────────────────────────────────
-        for k in [10, 100]:
+        for k in args.k_values:
             print(f"\n  --- Stage 2: Sequential Decoding (k={k}) ---")
-            seq_ms = measure_stage2(
+            seq_gpu_ms, seq_wall_ms = measure_stage2(
                 model, m, k, device,
                 warmup_batches=args.warmup_batches_s2,
             )
-            entry[f"seq_ql_k{k}_ms"] = round(seq_ms, 3)
+            entry[f"seq_gpu_ql_k{k}_ms"] = round(seq_gpu_ms, 3)
+            entry[f"seq_wall_ql_k{k}_ms"] = round(seq_wall_ms, 3)
 
         results[f"m{m}"] = entry
         print(f"\n  Results for m={m}: {json.dumps(entry, indent=2)}")
@@ -330,12 +352,25 @@ def main():
     print(f"\n{'='*70}")
     print(f"  EFFICIENCY RESULTS SUMMARY")
     print(f"{'='*70}")
-    print(f"{'m':>4}  {'Index (GB)':>10}  {'Simul QL':>10}  {'Seq k=10':>10}  {'Seq k=100':>10}")
-    print(f"{'----':>4}  {'----------':>10}  {'--------':>10}  {'--------':>10}  {'---------':>10}")
-    for m in [16, 32, 64]:
+    print(
+        f"{'m':>4}  {'Index (GB)':>10}  {'SimGPU':>10}  {'SimWall':>10}  "
+        f"{'Seq10GPU':>10}  {'Seq10Wall':>10}  {'Seq100GPU':>10}  {'Seq100Wall':>10}"
+    )
+    print(
+        f"{'----':>4}  {'----------':>10}  {'------':>10}  {'-------':>10}  "
+        f"{'--------':>10}  {'---------':>10}  {'---------':>10}  {'----------':>10}"
+    )
+    for m in args.m_values:
         e = results[f"m{m}"]
-        print(f"{m:>4}  {e['index_mem_gb']:>10.3f}  {e['simul_ql_ms']:>10.3f}  "
-              f"{e['seq_ql_k10_ms']:>10.3f}  {e['seq_ql_k100_ms']:>10.3f}")
+        seq10_gpu = e.get("seq_gpu_ql_k10_ms", float("nan"))
+        seq10_wall = e.get("seq_wall_ql_k10_ms", float("nan"))
+        seq100_gpu = e.get("seq_gpu_ql_k100_ms", float("nan"))
+        seq100_wall = e.get("seq_wall_ql_k100_ms", float("nan"))
+        print(
+            f"{m:>4}  {e['index_mem_gb']:>10.3f}  {e['simul_gpu_ql_ms']:>10.3f}  "
+            f"{e['simul_wall_ql_ms']:>10.3f}  {seq10_gpu:>10.3f}  {seq10_wall:>10.3f}  "
+            f"{seq100_gpu:>10.3f}  {seq100_wall:>10.3f}"
+        )
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@
 #SBATCH --time=8:00:00
 #SBATCH --output=experiments/%x-%j_bow.out
 #SBATCH --error=experiments/%x-%j_bow.err
-#SBATCH --chdir=/gpfs/work4/0/prjs1037/dpo-exp/pag-repro/
+#SBATCH --chdir=.
 
 mkdir -p experiments
 

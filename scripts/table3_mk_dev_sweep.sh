@@ -5,7 +5,7 @@
 #SBATCH --time=18:00:00
 #SBATCH --output=experiments/table3_mk_sweep/logs/%x-%j.out
 #SBATCH --error=experiments/table3_mk_sweep/logs/%x-%j.err
-#SBATCH --chdir=/gpfs/work4/0/prjs1037/dpo-exp/pag-repro/
+#SBATCH --chdir=.
 
 # =============================================================================
 # Table 3 reproduction (DEV ONLY): effectiveness & efficiency with different m and k

@@ -5,7 +5,7 @@
 #SBATCH --time=4:00:00
 #SBATCH --output=experiments/Ablations/%x-%j_RQ1_iii_wo_adding_s_simul.out
 #SBATCH --error=experiments/Ablations/%x-%j_RQ1_iii_wo_adding_s_simul.err
-#SBATCH --chdir=/gpfs/work4/0/prjs1037/dpo-exp/pag-repro/
+#SBATCH --chdir=.
 
 mkdir -p experiments/Ablations
 

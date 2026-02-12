@@ -11,7 +11,8 @@
 #   bash robustness/scripts/run_rq2_pipeline.sh dl19 mispelling  # single split + attack
 # ──────────────────────────────────────────────────────────────────────
 
-cd /gpfs/work4/0/prjs1037/dpo-exp/pag-repro
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
 
 SPLIT_ARG="${1:-all}"
 ATTACK_ARG="${2:-all}"

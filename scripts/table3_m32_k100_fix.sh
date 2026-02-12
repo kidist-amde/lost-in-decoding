@@ -5,7 +5,7 @@
 #SBATCH --time=03:00:00
 #SBATCH --output=experiments/table3_mk_sweep/logs/%x-%j.out
 #SBATCH --error=experiments/table3_mk_sweep/logs/%x-%j.err
-#SBATCH --chdir=/gpfs/work4/0/prjs1037/dpo-exp/pag-repro/
+#SBATCH --chdir=.
 
 set -euo pipefail
 

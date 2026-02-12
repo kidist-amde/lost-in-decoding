@@ -29,7 +29,8 @@ export PYTHONUNBUFFERED=1
 
 nvidia-smi
 
-cd /gpfs/work4/0/prjs1037/dpo-exp/pag-repro
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
 
 split=$1
 attack_method=$2
@@ -48,11 +49,11 @@ echo "  MASTER_PORT:   $MASTER_PORT"
 echo "========================================"
 
 # Pre-build prefix tree if not cached (only runs once, then reuses pickle)
-DOCID_SMTID=/gpfs/work4/0/prjs1037/dpo-exp/pag-repro/RIPOR/RIPOR_data/experiments-full-t5seq-aq/t5_docid_gen_encoder_1/aq_smtid/docid_to_smtid.json
+DOCID_SMTID=${REPO_ROOT}/RIPOR/RIPOR_data/experiments-full-t5seq-aq/t5_docid_gen_encoder_1/aq_smtid/docid_to_smtid.json
 PKL_PATH="$(dirname "$DOCID_SMTID")/list_smtid_to_nextids.pkl"
 if [ ! -f "$PKL_PATH" ]; then
     echo "Building prefix tree (first run only)..."
-    PYTHONPATH=/gpfs/work4/0/prjs1037/dpo-exp/pag-repro/RIPOR python \
+    PYTHONPATH=${REPO_ROOT}/RIPOR python \
         -m t5_pretrainer.aq_preprocess.build_list_smtid_to_nextids \
         --docid_to_smtid_path="$DOCID_SMTID"
 fi

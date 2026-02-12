@@ -6,7 +6,7 @@ from tqdm import tqdm
 from copy import deepcopy
 import numpy as np
 
-teacher_score_path = "/home/ec2-user/quic-efs/user/hansizeng/work/data/msmarco/hard_negatives_scores/cross-encoder-ms-marco-MiniLM-L-6-v2-scores.pkl.gz"
+teacher_score_path = "<PATH_TO_WORKDIR>/data/msmarco/hard_negatives_scores/cross-encoder-ms-marco-MiniLM-L-6-v2-scores.pkl.gz"
 with gzip.open(teacher_score_path, "rb") as fin:
     qid_to_rerank = pickle.load(fin)
 
@@ -20,7 +20,7 @@ for qid in tqdm(qid_to_rerank, total=len(qid_to_rerank)):
 qid_to_rerank = new_qid_to_rerank
 new_qid_to_rerank = None
 
-qrel_path = "/home/ec2-user/quic-efs/user/hansizeng/work/data/msmarco/train_queries/qrels.json"
+qrel_path = "<PATH_TO_WORKDIR>/data/msmarco/train_queries/qrels.json"
 with open(qrel_path) as fin:
     qid_to_reldocids = ujson.load(fin)
 
@@ -49,7 +49,7 @@ for qid, reldocids in tqdm(qid_to_reldocids.items(), total=len(qid_to_reldocids)
 
 print("number of examples = {}".format(len(train_examples)))
 print("distribution of lengths: ", np.quantile(lengths, [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0]))
-with open("/home/ec2-user/quic-efs/user/hansizeng/work/data/msmarco/hard_negatives_scores/qrel_added_teacher_scores.json", "w") as fout:
+with open("<PATH_TO_WORKDIR>/data/msmarco/hard_negatives_scores/qrel_added_teacher_scores.json", "w") as fout:
     for example in train_examples:
         fout.write(ujson.dumps(example) + "\n")
 

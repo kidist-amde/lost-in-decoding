@@ -26,7 +26,8 @@ conda activate pag-env
 
 nvidia-smi
 
-cd /gpfs/work4/0/prjs1037/dpo-exp/pag-repro
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
 
 # Create log directory
 mkdir -p experiments/RQ3_crosslingual/logs

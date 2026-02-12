@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 import seaborn as sns
 
-qrel_paths = ["/home/ec2-user/quic-efs/user/hansizeng/work/data/msmarco-full/TREC_DL_2019/qrel.json",
-              "/home/ec2-user/quic-efs/user/hansizeng/work/data/msmarco-full/TREC_DL_2020/qrel.json"]
+qrel_paths = ["<PATH_TO_WORKDIR>/data/msmarco-full/TREC_DL_2019/qrel.json",
+              "<PATH_TO_WORKDIR>/data/msmarco-full/TREC_DL_2020/qrel.json"]
 
 def read_qid_to_reldocids(qrel_paths):
     qid_to_reldocids = {}
@@ -29,13 +29,13 @@ def get_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--lex_docid_to_smtid_path",
-                        default="/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/experiments-splade/t5-splade-0-12l/top_bow/docid_to_tokenids.json",
+                        default="<PATH_TO_WORKDIR>/term_generative_retriever/experiments-splade/t5-splade-0-12l/top_bow/docid_to_tokenids.json",
                         type=str)
     parser.add_argument("--model_dir",
-                        default="/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/experiments-full-lexical-ripor/lexical_ripor_direct_lng_knp_seq2seq_1/",
+                        default="<PATH_TO_WORKDIR>/term_generative_retriever/experiments-full-lexical-ripor/lexical_ripor_direct_lng_knp_seq2seq_1/",
                         type=str)
     parser.add_argument("--out_dir",
-                        default="/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/t5_pretrainer/analysis/doc_cluster_images/",
+                        default="<PATH_TO_WORKDIR>/term_generative_retriever/t5_pretrainer/analysis/doc_cluster_images/",
                         type=str)
     args = parser.parse_args()
 

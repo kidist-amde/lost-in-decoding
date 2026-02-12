@@ -12,7 +12,8 @@
 
 set -e
 
-cd /gpfs/work4/0/prjs1037/dpo-exp/pag-repro
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
 
 # Default languages and splits
 LANGUAGES="${1:-fr de zh nl}"

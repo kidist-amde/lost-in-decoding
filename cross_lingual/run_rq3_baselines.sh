@@ -21,7 +21,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="/gpfs/work4/0/prjs1037/dpo-exp/pag-repro"
+REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 # ── Defaults ──────────────────────────────────────────────────────────────

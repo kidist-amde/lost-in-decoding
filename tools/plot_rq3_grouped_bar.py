@@ -32,10 +32,10 @@ ndcg_data = {
 }
 
 colors = {
-    "Seq-only": "#D65F5F",
-    "Naive": "#4878CF",
-    "Aligned": "#ECA539",
-    "Translate": "#6ACC65",
+    "Seq-only": "#FBB4AE",
+    "Naive": "#A6CEE3",
+    "Aligned": "#CAB2D6",
+    "Translate": "#B2DF8A",
 }
 hatches = {"Seq-only": "//", "Naive": "", "Aligned": "xx", "Translate": ".."}
 
@@ -79,8 +79,8 @@ handles, labels = ax[0].get_legend_handles_labels()
 fig.legend(
     handles,
     labels,
-    loc="lower center",
-    bbox_to_anchor=(0.5, -0.02),
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.02),  # push a bit above the axes
     ncol=4,
     fontsize=12,
     frameon=False,
@@ -88,7 +88,8 @@ fig.legend(
     handlelength=1.5,
 )
 
-fig.tight_layout(rect=[0, 0.10, 1, 1])
+fig.tight_layout(rect=[0, 0.0, 1, 0.92])  # leave room at top for legend
+
 fig.savefig(os.path.join(OUTDIR, "rq3_crosslingual_bar.pdf"), bbox_inches="tight")
 print("Saved: figures/rq3_crosslingual_bar.pdf")
 plt.show()

@@ -10,7 +10,7 @@ import numpy as np
 smt_ret_run_path = "../experiments-full-lexical-ripor/ripor_seq2seq_1/sub_tokenid_8_out_1000/MSMARCO/run.json"
 smt_docid_to_smtid_path = "../experiments-full-lexical-ripor/t5-full-dense-1-5e-4-12l/aq_smtid/docid_to_tokenids.json"
 out_dir = "../experiments-full-lexical-ripor/ripor_seq2seq_1/analysis"
-qrels_path = "/home/ec2-user/quic-efs/user/hansizeng/work/data/msmarco-full/dev_qrel.json"
+qrels_path = "<PATH_TO_WORKDIR>/data/msmarco-full/dev_qrel.json"
 
 #with open(lex_ret_run_path) as fin:
 #    lex_ret_run = ujson.laod(fin)

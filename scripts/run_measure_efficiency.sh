@@ -5,7 +5,7 @@
 #SBATCH --time=06:00:00
 #SBATCH --output=experiments/table3_mk_sweep/logs/%x-%j.out
 #SBATCH --error=experiments/table3_mk_sweep/logs/%x-%j.err
-#SBATCH --chdir=/gpfs/work4/0/prjs1037/dpo-exp/pag-repro/
+#SBATCH --chdir=.
 
 set -euo pipefail
 
@@ -21,8 +21,8 @@ echo ""
 python scripts/measure_efficiency.py \
     --warmup_batches_s1 5 \
     --warmup_batches_s2 2 \
-    --out experiments/table3_mk_sweep/efficiency_results.json \
-    2>&1 | tee experiments/table3_mk_sweep/logs/efficiency_measurement.log
+    --out experiments/table3_mk_sweep/efficiency_results_dual_timing.json \
+    2>&1 | tee experiments/table3_mk_sweep/logs/efficiency_results_dual_timing.log
 
 echo ""
 echo "Done at $(date)"

@@ -32,10 +32,10 @@ def get_mrr_10_diff(qrels, lex_run, other_run):
 
 
 if __name__ == "__main__":
-    lex_run_path = "/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/experiments-full-lexical-ripor/lexical_ripor_direct_lng_knp_seq2seq_1/all_lex_rets/lex_ret_1000/MSMARCO/run.json"
-    qrels_path = "/home/ec2-user/quic-efs/user/hansizeng/work/data/msmarco-full/dev_qrel.json"
-    other_run_path = "/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/experiments-full-lexical-ripor/lexical_ripor_direct_lng_knp_seq2seq_1/all_lex_rets/lex_ret_1000/ltmp_smt_ret_100/MSMARCO/run.json"
-    next_run_path = "/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/experiments-full-lexical-ripor/ripor_direct_lng_knp_seq2seq_1/sub_tokenid_8_out_1000/MSMARCO/run.json"
+    lex_run_path = "<PATH_TO_WORKDIR>/term_generative_retriever/experiments-full-lexical-ripor/lexical_ripor_direct_lng_knp_seq2seq_1/all_lex_rets/lex_ret_1000/MSMARCO/run.json"
+    qrels_path = "<PATH_TO_WORKDIR>/data/msmarco-full/dev_qrel.json"
+    other_run_path = "<PATH_TO_WORKDIR>/term_generative_retriever/experiments-full-lexical-ripor/lexical_ripor_direct_lng_knp_seq2seq_1/all_lex_rets/lex_ret_1000/ltmp_smt_ret_100/MSMARCO/run.json"
+    next_run_path = "<PATH_TO_WORKDIR>/term_generative_retriever/experiments-full-lexical-ripor/ripor_direct_lng_knp_seq2seq_1/sub_tokenid_8_out_1000/MSMARCO/run.json"
 
     with open(lex_run_path) as fin:
         lex_run = ujson.load(fin)

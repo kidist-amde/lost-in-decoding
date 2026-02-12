@@ -4,9 +4,9 @@ import matplotlib.pyplot as plt
 
 
 if __name__ == "__main__":
-    ripor_runs_dir = "/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/experiments-full-lexical-ripor/ripor_direct_lng_knp_seq2seq_1/doc_ret_by_sub_tokens/"
-    lex_ripor_runs_dir = "/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/experiments-full-lexical-ripor/lexical_ripor_direct_lng_knp_seq2seq_1/doc_ret_by_sub_tokens/"
-    out_dir = "/home/ec2-user/quic-efs/user/hansizeng/work/term_generative_retriever/t5_pretrainer/analysis/prefix_perf_comp/"
+    ripor_runs_dir = "<PATH_TO_WORKDIR>/term_generative_retriever/experiments-full-lexical-ripor/ripor_direct_lng_knp_seq2seq_1/doc_ret_by_sub_tokens/"
+    lex_ripor_runs_dir = "<PATH_TO_WORKDIR>/term_generative_retriever/experiments-full-lexical-ripor/lexical_ripor_direct_lng_knp_seq2seq_1/doc_ret_by_sub_tokens/"
+    out_dir = "<PATH_TO_WORKDIR>/term_generative_retriever/t5_pretrainer/analysis/prefix_perf_comp/"
     if not os.path.exists(out_dir):
         os.mkdir(out_dir)
 

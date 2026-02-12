@@ -1,22 +1,31 @@
+# tools/query_attack_results_pag_vs_dense.py
+
 import json
 import os
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from openpyxl import load_workbook
 
-# Match typography used in tools/plot_rq3_grouped_bar.py
-plt.rcParams["pdf.fonttype"] = 42
-plt.rcParams["ps.fonttype"] = 42
-plt.rcParams["font.family"] = "DejaVu Sans"
-plt.rcParams["font.size"] = 12
-plt.rcParams["axes.linewidth"] = 0.8
-plt.rcParams["xtick.major.width"] = 0.8
-plt.rcParams["ytick.major.width"] = 0.8
+# Set font to serif (Times New Roman style)
+
+# Set font to serif (Times New Roman style)
+plt.rcParams['font.family'] = 'serif'
+plt.rcParams['font.serif'] = ['Times New Roman', 'DejaVu Serif', 'STIXGeneral']
+plt.rcParams['font.size'] = 22
+plt.rcParams['axes.titlesize'] = 22
+plt.rcParams['axes.labelsize'] = 24
+plt.rcParams['xtick.labelsize'] = 22
+plt.rcParams['ytick.labelsize'] = 22
+plt.rcParams['legend.fontsize'] = 22
 
 
-def safe_read_attack_xlsx(path):
-    """Read attack-result xlsx as raw table data to avoid pandas parser issues."""
+
+def safe_read_attack_xlsx(path: str) -> Tuple[List[str], List[List[Any]]]:
+    """Read xlsx as raw table data to avoid pandas parser issues."""
     wb = load_workbook(path, data_only=True, read_only=True)
     ws = wb[wb.sheetnames[0]]
 
@@ -27,7 +36,7 @@ def safe_read_attack_xlsx(path):
 
     n_cols = max(len(r) for r in rows)
 
-    def normalize_row(row):
+    def normalize_row(row: List[Any]) -> List[Any]:
         row = list(row[:n_cols])
         if len(row) < n_cols:
             row.extend([None] * (n_cols - len(row)))
@@ -37,8 +46,9 @@ def safe_read_attack_xlsx(path):
     header = [str(v).strip() if v is not None else f"col_{i}" for i, v in enumerate(rows[0])]
     return header, rows[1:]
 
-def main():
-    model_list = [  # Only these models are needed
+
+def main() -> None:
+    model_list = [
         "qwen3",
         "embeddinggemma",
         "tas_b",
@@ -52,10 +62,7 @@ def main():
         "nomic_v2": "Nomic-v2",
     }
 
-    dataset_list = [  # Only MS MARCO dataset is needed
-        "msmarco",
-    ]
-
+    dataset_list = ["msmarco"]
     split_list = ["dev", "trec_dl19", "trec_dl20"]
 
     split_display_names = {
@@ -83,40 +90,35 @@ def main():
     }
 
     attack_methods_for_eval = [m for m in attack_method_list if m != "none"]
-
     seed_list = [1999, 5, 27, 2016, 2026]
 
     scores_base_path = "<PATH_TO_ATTACK_SCORES>"
     os.makedirs("tools/excel_results", exist_ok=True)
 
-    # ========== Collect all data ==========
-    # Structure: {split: {model: {"clean_mean": float, "clean_std": float, attack_method: (dr_mean, dr_std)}}}
-    all_data = {}
-    all_metrics = {}  # Record which metric each split uses
+    all_data: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    all_metrics: Dict[str, str] = {}
 
     for dataset in dataset_list:
         for split in split_list:
-            # Dev uses MRR@10, other splits use NDCG@10
-            if split == "dev":
-                target_metric = "MRR@10"
-            else:
-                target_metric = "NDCG@10"
+            target_metric = "MRR@10" if split == "dev" else "NDCG@10"
 
             key = f"{dataset}_{split}"
             all_metrics[key] = target_metric
-            data = {}
+            data: Dict[str, Dict[str, Any]] = {}
 
             for model in model_list:
                 data[model] = {}
 
-                # 1) Get clean (none) target_metric values
-                clean_metric_list = []
+                clean_metric_list: List[float] = []
                 for seed in seed_list:
-                    path = f"{scores_base_path}/{model}/{dataset}_{split}/attack_method_none_seed_{seed}_attacked_num_50/metrics_scores_and_asr.json"
+                    path = (
+                        f"{scores_base_path}/{model}/{dataset}_{split}/"
+                        f"attack_method_none_seed_{seed}_attacked_num_50/metrics_scores_and_asr.json"
+                    )
                     try:
                         with open(path, "r") as f:
                             scores = json.load(f)
-                        clean_metric_list.append(scores[target_metric])
+                        clean_metric_list.append(float(scores[target_metric]))
                     except FileNotFoundError:
                         print(f"[WARN] File not found: {path}")
 
@@ -124,25 +126,27 @@ def main():
                     print(f"[WARN] No clean data for model={model}, split={split}")
                     continue
 
-                clean_mean = np.mean(clean_metric_list)
-                clean_std = np.std(clean_metric_list)
+                clean_mean = float(np.mean(clean_metric_list))
+                clean_std = float(np.std(clean_metric_list))
                 data[model]["clean_mean"] = clean_mean
                 data[model]["clean_std"] = clean_std
                 print(f"model={model}, split={split}, clean {target_metric}: {clean_mean:.4f} ± {clean_std:.4f}")
 
-                # 2) Compute decrease rate for each attack method
                 for attack_method in attack_methods_for_eval:
-                    decrease_rate_list = []
+                    decrease_rate_list: List[float] = []
                     for seed_idx, seed in enumerate(seed_list):
-                        path = f"{scores_base_path}/{model}/{dataset}_{split}/attack_method_{attack_method}_seed_{seed}_attacked_num_50/metrics_scores_and_asr.json"
+                        path = (
+                            f"{scores_base_path}/{model}/{dataset}_{split}/"
+                            f"attack_method_{attack_method}_seed_{seed}_attacked_num_50/metrics_scores_and_asr.json"
+                        )
                         try:
                             with open(path, "r") as f:
                                 scores = json.load(f)
-                            attacked_val = scores[target_metric]
+                            attacked_val = float(scores[target_metric])
                             if seed_idx < len(clean_metric_list):
                                 clean_val = clean_metric_list[seed_idx]
                                 dr = (clean_val - attacked_val) / clean_val
-                                decrease_rate_list.append(dr)
+                                decrease_rate_list.append(float(dr))
                         except FileNotFoundError:
                             print(f"[WARN] File not found: {path}")
 
@@ -150,50 +154,45 @@ def main():
                         print(f"[WARN] No attacked data for model={model}, split={split}, attack={attack_method}")
                         continue
 
-                    dr_mean = np.mean(decrease_rate_list)
-                    dr_std = np.std(decrease_rate_list)
+                    dr_mean = float(np.mean(decrease_rate_list))
+                    dr_std = float(np.std(decrease_rate_list))
                     data[model][attack_method] = (dr_mean, dr_std)
                     print(f"  attack={attack_method}, decrease_rate: {dr_mean:.4f} ± {dr_std:.4f}")
 
             all_data[key] = data
 
-    # ========== Generate and save table for each split ==========
     for dataset in dataset_list:
         for split in split_list:
             key = f"{dataset}_{split}"
             data = all_data[key]
-            split_display = split_display_names[split]
 
-            # Build DataFrame: rows=attack methods, columns=models (mean ± std)
-            columns = []
+            columns: List[str] = []
             for model in model_list:
                 display = model_display_names[model]
                 columns.append(display)
                 columns.append(f"{display}-std")
 
-            rows = []
-            row_labels = []
+            rows: List[List[float]] = []
+            row_labels: List[str] = []
 
-            # First row: Clean (original metric value)
             metric = all_metrics[key]
-            row = []
+            row: List[float] = []
             for model in model_list:
                 if "clean_mean" in data[model]:
-                    row.append(round(data[model]["clean_mean"], 4))
-                    row.append(round(data[model]["clean_std"], 4))
+                    row.append(round(float(data[model]["clean_mean"]), 4))
+                    row.append(round(float(data[model]["clean_std"]), 4))
                 else:
                     row.append(np.nan)
                     row.append(np.nan)
             rows.append(row)
             row_labels.append(f"Clean ({metric})")
 
-            # Subsequent rows: decrease rate for each attack method
             for attack_method in attack_methods_for_eval:
                 row = []
                 for model in model_list:
                     if attack_method in data[model]:
-                        row.append(round(data[model][attack_method][0], 4))
-                        row.append(round(data[model][attack_method][1], 4))
+                        row.append(round(float(data[model][attack_method][0]), 4))
+                        row.append(round(float(data[model][attack_method][1]), 4))
                     else:
                         row.append(np.nan)
                         row.append(np.nan)
@@ -207,9 +206,8 @@ def main():
             df.to_excel(excel_path, index_label="Attack Method")
             print(f"\nSaved Excel: {excel_path}")
 
-    # ========== Generate summary table (all splits in one table) ==========
-    summary_rows = []
-    summary_index = []
+    summary_rows: List[Dict[str, str]] = []
+    summary_index: List[Tuple[str, str]] = []
 
     for dataset in dataset_list:
         for split in split_list:
@@ -217,8 +215,7 @@ def main():
             data = all_data[key]
             split_display = split_display_names[split]
 
-            # Clean row
-            row = {}
+            row: Dict[str, str] = {}
             for model in model_list:
                 display = model_display_names[model]
                 if "clean_mean" in data[model]:
@@ -228,7 +225,6 @@ def main():
             summary_rows.append(row)
             summary_index.append((split_display, f"Clean ({all_metrics[key]})"))
 
-            # Attack method rows
             for attack_method in attack_methods_for_eval:
                 row = {}
                 for model in model_list:
@@ -242,7 +238,6 @@ def main():
                 summary_rows.append(row)
                 summary_index.append((split_display, attack_method_display_names[attack_method]))
 
-    # Create multi-level index DataFrame
     multi_index = pd.MultiIndex.from_tuples(summary_index, names=["Split", "Attack Method"])
     summary_df = pd.DataFrame(summary_rows, index=multi_index)
 
@@ -250,7 +245,6 @@ def main():
     summary_df.to_excel(summary_excel_path)
     print(f"\nSaved summary Excel: {summary_excel_path}")
 
-    # ========== Print summary table to terminal ==========
     print("\n" + "=" * 100)
     print("Query Attack Results Summary for PAG (MS MARCO)")
     print("=" * 100)
@@ -268,7 +262,6 @@ def main():
             print(header)
             print("-" * (20 + 25 * len(model_list)))
 
-            # Clean
             metric = all_metrics[key]
             line = f"{'Clean (' + metric + ')':<20}"
             for model in model_list:
@@ -278,7 +271,6 @@ def main():
                     line += f"{'N/A':>25}"
             print(line)
 
-            # Attack method decrease rate
             for attack_method in attack_methods_for_eval:
                 line = f"{attack_method_display_names[attack_method]:<20}"
                 for model in model_list:
@@ -297,43 +289,42 @@ def main():
 
 
 def draw_query_attack_results_pag():
-    # Stage 2: PAG (End-to-end) data, extracted from paper Table 4
-    # Format: {split: {variation: (metric_mean, metric_std, delta_mean, delta_std)}}
-    # DL19/DL20 use NDCG@10, Dev uses MRR@10
-
     pag_data = {
-        "trec_dl19": {  # NDCG@10 (Δ)
-            "clean":        (0.669, 0.000, None,  None),
-            "mispelling":   (0.452, 0.012, 0.217, 0.012),
-            "ordering":     (0.654, 0.009, 0.014, 0.009),
-            "synonym":      (0.526, 0.018, 0.143, 0.018),
-            "paraphrase":   (0.596, 0.012, 0.073, 0.012),
-            "naturality":   (0.626, 0.000, 0.043, 0.000),
+        "trec_dl19": {
+            "clean": (0.669, 0.000, None, None),
+            "mispelling": (0.452, 0.012, 0.217, 0.012),
+            "ordering": (0.654, 0.009, 0.014, 0.009),
+            "synonym": (0.526, 0.018, 0.143, 0.018),
+            "paraphrase": (0.596, 0.012, 0.073, 0.012),
+            "naturality": (0.626, 0.000, 0.043, 0.000),
         },
-        "trec_dl20": {  # NDCG@10 (Δ)
-            "clean":        (0.621, 0.000, None,  None),
-            "mispelling":   (0.461, 0.019, 0.161, 0.019),
-            "ordering":     (0.607, 0.009, 0.014, 0.009),
-            "synonym":      (0.508, 0.007, 0.114, 0.007),
-            "paraphrase":   (0.512, 0.019, 0.109, 0.019),
-            "naturality":   (0.598, 0.000, 0.023, 0.000),
+        "trec_dl20": {
+            "clean": (0.621, 0.000, None, None),
+            "mispelling": (0.461, 0.019, 0.161, 0.019),
+            "ordering": (0.607, 0.009, 0.014, 0.009),
+            "synonym": (0.508, 0.007, 0.114, 0.007),
+            "paraphrase": (0.512, 0.019, 0.109, 0.019),
+            "naturality": (0.598, 0.000, 0.023, 0.000),
         },
-        "dev": {  # MRR@10 (Δ)
-            "clean":        (0.362, 0.000, None,  None),
-            "mispelling":   (0.215, 0.003, 0.147, 0.003),
-            "ordering":     (0.350, 0.001, 0.012, 0.001),
-            "synonym":      (0.268, 0.002, 0.094, 0.002),
-            "paraphrase":   (0.300, 0.002, 0.062, 0.002),
-            "naturality":   (0.342, 0.000, 0.020, 0.000),
+        "dev": {
+            "clean": (0.362, 0.000, None, None),
+            "mispelling": (0.215, 0.003, 0.147, 0.003),
+            "ordering": (0.350, 0.001, 0.012, 0.001),
+            "synonym": (0.268, 0.002, 0.094, 0.002),
+            "paraphrase": (0.300, 0.002, 0.062, 0.002),
+            "naturality": (0.342, 0.000, 0.020, 0.000),
         },
     }
 
-    # Print for verification
     split_metric = {"trec_dl19": "NDCG@10", "trec_dl20": "NDCG@10", "dev": "MRR@10"}
     split_display = {"trec_dl19": "TREC DL 2019", "trec_dl20": "TREC DL 2020", "dev": "MS MARCO (Dev)"}
     attack_display = {
-        "clean": "Clean", "mispelling": "Misspelling", "ordering": "Reordering",
-        "synonym": "Synonymizing", "paraphrase": "Paraphrasing", "naturality": "Naturalizing",
+        "clean": "Clean",
+        "mispelling": "Misspelling",
+        "ordering": "Reordering",
+        "synonym": "Synonymizing",
+        "paraphrase": "Paraphrasing",
+        "naturality": "Naturalizing",
     }
 
     print("=" * 70)
@@ -347,45 +338,39 @@ def draw_query_attack_results_pag():
         for variation in ["clean", "mispelling", "ordering", "synonym", "paraphrase", "naturality"]:
             mean, std, d_mean, d_std = pag_data[split][variation]
             val_str = f"{mean:.3f} ± {std:.3f}"
-            if d_mean is not None:
-                delta_str = f"{d_mean:.3f} ± {d_std:.3f}"
-            else:
-                delta_str = "–"
+            delta_str = f"{d_mean:.3f} ± {d_std:.3f}" if d_mean is not None else "–"
             print(f"{attack_display[variation]:<15} {val_str:>20} {delta_str:>20}")
 
-
-    # PAG decrease rate = delta / clean_value, std ≈ delta_std / clean_value
-    # Consistent with main(): dr = (clean_val - attacked_val) / clean_val
-    # trec_dl19 clean=0.669, trec_dl20 clean=0.621, dev clean=0.362
-
     pag_decrease_rate = {
-        "trec_dl19": {  # clean NDCG@10 = 0.669
-            "clean_mean": 0.6690, "clean_std": 0.0000,
-            "mispelling":   (0.3243, 0.0179),  # 0.217/0.669, 0.012/0.669
-            "ordering":     (0.0209, 0.0134),  # 0.014/0.669, 0.009/0.669
-            "synonym":      (0.2138, 0.0269),  # 0.143/0.669, 0.018/0.669
-            "paraphrase":   (0.1091, 0.0179),  # 0.073/0.669, 0.012/0.669
-            "naturality":   (0.0643, 0.0000),  # 0.043/0.669, 0.000/0.669
+        "trec_dl19": {
+            "clean_mean": 0.6690,
+            "clean_std": 0.0000,
+            "mispelling": (0.3243, 0.0179),
+            "ordering": (0.0209, 0.0134),
+            "synonym": (0.2138, 0.0269),
+            "paraphrase": (0.1091, 0.0179),
+            "naturality": (0.0643, 0.0000),
         },
-        "trec_dl20": {  # clean NDCG@10 = 0.621
-            "clean_mean": 0.6210, "clean_std": 0.0000,
-            "mispelling":   (0.2593, 0.0306),  # 0.161/0.621, 0.019/0.621
-            "ordering":     (0.0225, 0.0145),  # 0.014/0.621, 0.009/0.621
-            "synonym":      (0.1836, 0.0113),  # 0.114/0.621, 0.007/0.621
-            "paraphrase":   (0.1755, 0.0306),  # 0.109/0.621, 0.019/0.621
-            "naturality":   (0.0370, 0.0000),  # 0.023/0.621, 0.000/0.621
+        "trec_dl20": {
+            "clean_mean": 0.6210,
+            "clean_std": 0.0000,
+            "mispelling": (0.2593, 0.0306),
+            "ordering": (0.0225, 0.0145),
+            "synonym": (0.1836, 0.0113),
+            "paraphrase": (0.1755, 0.0306),
+            "naturality": (0.0370, 0.0000),
         },
-        "dev": {  # clean MRR@10 = 0.362
-            "clean_mean": 0.3620, "clean_std": 0.0000,
-            "mispelling":   (0.4061, 0.0083),  # 0.147/0.362, 0.003/0.362
-            "ordering":     (0.0331, 0.0028),  # 0.012/0.362, 0.001/0.362
-            "synonym":      (0.2597, 0.0055),  # 0.094/0.362, 0.002/0.362
-            "paraphrase":   (0.1713, 0.0055),  # 0.062/0.362, 0.002/0.362
-            "naturality":   (0.0552, 0.0000),  # 0.020/0.362, 0.000/0.362
+        "dev": {
+            "clean_mean": 0.3620,
+            "clean_std": 0.0000,
+            "mispelling": (0.4061, 0.0083),
+            "ordering": (0.0331, 0.0028),
+            "synonym": (0.2597, 0.0055),
+            "paraphrase": (0.1713, 0.0055),
+            "naturality": (0.0552, 0.0000),
         },
     }
 
-    # Print decrease rate for verification
     print("\n" + "=" * 70)
     print("PAG Decrease Rate (consistent with main(): dr = delta / clean)")
     print("=" * 70)
@@ -397,41 +382,36 @@ def draw_query_attack_results_pag():
             dr_mean, dr_std = pag_decrease_rate[split][variation]
             print(f"  {attack_display[variation]:<15} decrease_rate: {dr_mean:.4f} ± {dr_std:.4f}")
 
-
-
-    # ========== RIPOR decrease rate (static data) ==========
-    # DL19/DL20: NDCG@10, Dev: MRR@10
-    # dr = delta / clean, dr_std = delta_std / clean
-    # DL19 clean NDCG@10=0.5604, DL20 clean NDCG@10=0.5587, Dev clean MRR@10=0.2820
-
     ripor_decrease_rate = {
-        "trec_dl19": {  # clean NDCG@10 = 0.5604
-            "clean_mean": 0.5604, "clean_std": 0.0000,
-            "mispelling":   (0.3231, 0.0492),  # 0.1811/0.5604, 0.0276/0.5604
-            "ordering":     (0.0260, 0.0203),  # 0.0146/0.5604, 0.0114/0.5604
-            "synonym":      (0.2311, 0.1171),  # 0.1295/0.5604, 0.0656/0.5604
-            "paraphrase":   (0.1147, 0.0266),  # 0.0643/0.5604, 0.0149/0.5604
-            "naturality":   (0.0480, 0.0000),  # 0.0269/0.5604, 0/0.5604
+        "trec_dl19": {
+            "clean_mean": 0.5604,
+            "clean_std": 0.0000,
+            "mispelling": (0.3231, 0.0492),
+            "ordering": (0.0260, 0.0203),
+            "synonym": (0.2311, 0.1171),
+            "paraphrase": (0.1147, 0.0266),
+            "naturality": (0.0480, 0.0000),
         },
-        "trec_dl20": {  # clean NDCG@10 = 0.5587
-            "clean_mean": 0.5587, "clean_std": 0.0000,
-            "mispelling":   (0.3877, 0.0208),  # 0.2166/0.5587, 0.0116/0.5587
-            "ordering":     (0.0260, 0.0122),  # 0.0145/0.5587, 0.0068/0.5587
-            "synonym":      (0.1997, 0.0349),  # 0.1116/0.5587, 0.0195/0.5587
-            "paraphrase":   (0.1738, 0.0415),  # 0.0971/0.5587, 0.0232/0.5587
-            "naturality":   (0.0447, 0.0000),  # 0.0250/0.5587, 0.0000/0.5587
+        "trec_dl20": {
+            "clean_mean": 0.5587,
+            "clean_std": 0.0000,
+            "mispelling": (0.3877, 0.0208),
+            "ordering": (0.0260, 0.0122),
+            "synonym": (0.1997, 0.0349),
+            "paraphrase": (0.1738, 0.0415),
+            "naturality": (0.0447, 0.0000),
         },
-        "dev": {  # clean MRR@10 = 0.2820
-            "clean_mean": 0.2820, "clean_std": 0.0000,
-            "mispelling":   (0.4823, 0.0028),  # 0.1360/0.2820, 0.0008/0.2820
-            "ordering":     (0.0436, 0.0039),  # 0.0123/0.2820, 0.0011/0.2820
-            "synonym":      (0.2957, 0.0046),  # 0.0834/0.2820, 0.0013/0.2820
-            "paraphrase":   (0.1897, 0.0064),  # 0.0535/0.2820, 0.0018/0.2820
-            "naturality":   (0.0465, 0.0000),  # 0.0131/0.2820, 0.0000/0.2820
+        "dev": {
+            "clean_mean": 0.2820,
+            "clean_std": 0.0000,
+            "mispelling": (0.4823, 0.0028),
+            "ordering": (0.0436, 0.0039),
+            "synonym": (0.2957, 0.0046),
+            "paraphrase": (0.1897, 0.0064),
+            "naturality": (0.0465, 0.0000),
         },
     }
 
-    # Print RIPOR decrease rate for verification
     print("\n" + "=" * 70)
     print("RIPOR Decrease Rate (dr = delta / clean)")
     print("=" * 70)
@@ -443,13 +423,15 @@ def draw_query_attack_results_pag():
             dr_mean, dr_std = ripor_decrease_rate[split][variation]
             print(f"  {attack_display[variation]:<15} decrease_rate: {dr_mean:.4f} ± {dr_std:.4f}")
 
-    # ========== Load baseline model data from Excel saved by main() ==========
+    # ===== Load baseline model data from Excel (ROBUST openpyxl reader; no pd.read_excel) =====
     baseline_model_list = ["tas_b", "embeddinggemma", "nomic_v2", "qwen3"]
     baseline_display_names = {
-        "qwen3": "Qwen3-8B", "embeddinggemma": "EmbeddingGemma",
-        "tas_b": "TAS-B", "nomic_v2": "Nomic-v2",
+        "qwen3": "Qwen3-8B",
+        "embeddinggemma": "EmbeddingGemma",
+        "tas_b": "TAS-B",
+        "nomic_v2": "Nomic-v2",
     }
-    # Accept both legacy and current column names from Excel files.
+
     model_column_aliases = {
         "qwen3": ["Qwen3-8B", "Qwen3"],
         "embeddinggemma": ["EmbeddingGemma"],
@@ -459,22 +441,25 @@ def draw_query_attack_results_pag():
 
     attack_methods = ["mispelling", "ordering", "synonym", "paraphrase", "naturality"]
     attack_display_to_key = {
-        "Misspelling": "mispelling", "Reordering": "ordering",
-        "Synonymizing": "synonym", "Paraphrasing": "paraphrase", "Naturalizing": "naturality",
+        "Misspelling": "mispelling",
+        "Reordering": "ordering",
+        "Synonymizing": "synonym",
+        "Paraphrasing": "paraphrase",
+        "Naturalizing": "naturality",
     }
 
-    baseline_data = {}  # {split: {model: {attack: (dr_mean, dr_std)}}}
+    baseline_data: Dict[str, Dict[str, Dict[str, Tuple[float, float]]]] = {
+        split: {m: {} for m in baseline_model_list} for split in ["trec_dl19", "trec_dl20", "dev"]
+    }
+
     for split in ["trec_dl19", "trec_dl20", "dev"]:
         excel_path = f"tools/excel_results/pag_msmarco_{split}_query_attack.xlsx"
-        baseline_data[split] = {m: {} for m in baseline_model_list}
-
         if not os.path.exists(excel_path):
             print(f"[WARN] Excel not found: {excel_path}, run main() first.")
             continue
 
         header, data_rows = safe_read_attack_xlsx(excel_path)
         print(f"Loaded baseline data from: {excel_path}")
-
         if not header:
             continue
 
@@ -486,6 +471,7 @@ def draw_query_attack_results_pag():
             attack_key = attack_display_to_key.get(row_label)
             if attack_key is None:
                 continue  # skip Clean row
+
             for model_key in baseline_model_list:
                 mean_col = None
                 std_col = None
@@ -504,12 +490,13 @@ def draw_query_attack_results_pag():
                     continue
 
                 try:
-                    mean_val = float(mean_val)
-                    std_val = float(std_val) if std_val is not None else 0.0
+                    mean_f = float(mean_val)
+                    std_f = float(std_val) if std_val is not None else 0.0
                 except (TypeError, ValueError):
                     continue
 
-                baseline_data[split][model_key][attack_key] = (mean_val, std_val)
+                baseline_data[split][model_key][attack_key] = (mean_f, std_f)
+
 
     # ========== Plot: 1x3 subplots ==========
     # All "models": 4 baselines + RIPOR + PAG
@@ -520,33 +507,30 @@ def draw_query_attack_results_pag():
     split_order = ["trec_dl19", "trec_dl20", "dev"]
     subplot_labels = ["(a)", "(b)", "(c)"]
 
-    fig, axes = plt.subplots(1, 3, figsize=(34, 6.8), sharey=False)
+    fig, axes = plt.subplots(1, 3, figsize=(34, 8), sharey=False)
 
     x = np.arange(len(attack_methods))
     width = 0.13
 
-    patterns = ['', '/', '\\', 'x', '+', 'o']
-    # Colorblind-safe, print-friendly palette with PAG fixed to yellow.
-    model_colors = {
-        "tas_b": "#A6CEE3",
-        "embeddinggemma": "#B2DF8A",
-        "nomic_v2": "#FBB4AE",
-        "qwen3": "#B3E2CD",
-        "RIPOR": "#CAB2D6",
-        "PAG": "#FDE68A",
-    }
+    def lighten_color(color: Any, amount: float = 0.35) -> Tuple[float, float, float]:
+        rgb = np.array(mcolors.to_rgb(color))
+        return tuple(rgb + (1.0 - rgb) * amount)
 
-    x_tick_labels = [
-        "Misspelling",
-        "Reordering",
-        "Synonymizing",
-        "Paraphrasing",
-        "Naturalizing",
-    ]
+    patterns = ['', '/', '\\', 'x', '+', 'o']
+    base_colors = [lighten_color(c) for c in plt.cm.Pastel1.colors[:n_models]]
+    raw_model_colors = {
+        "tas_b": "#87cefa",          # light sky blue
+        "embeddinggemma": "#98ffcc", # mint
+        "nomic_v2": "#fa8072",       # salmon
+        "qwen3": "#ffd966",          # yellow
+        "RIPOR": "#c8a2c8",          # purple
+    }
+    model_colors = {k: lighten_color(v) for k, v in raw_model_colors.items()}
 
     for idx, split in enumerate(split_order):
         ax = axes[idx]
         metric = split_metric[split]
+        max_with_error = 0.0
 
         for i, model_key in enumerate(all_model_keys):
             means = []
@@ -567,43 +551,57 @@ def draw_query_attack_results_pag():
                     means.append(0)
                     stds.append(0)
 
+            if means:
+                max_with_error = max(
+                    max_with_error,
+                    max(m + s for m, s in zip(means, stds)),
+                )
+
             offset = (i - n_models / 2 + 0.5) * width
+            bar_color = model_colors.get(model_key, base_colors[i])
             ax.bar(x + offset, means, width, yerr=stds,
                    label=all_display_names[model_key] if idx == 0 else "",
-                   capsize=2.5, color=model_colors[model_key],
+                   capsize=3, color=bar_color,
                    hatch=patterns[i % len(patterns)],
-                   edgecolor='dimgray', linewidth=0.5,
-                   error_kw={'elinewidth': 0.9, 'capthick': 0.9})
+                   edgecolor='dimgray', linewidth=0.4,
+                   error_kw={'elinewidth': 1, 'capthick': 1})
 
-        ax.set_xlabel(f'{subplot_labels[idx]} {metric} Drop Rate on {split_display[split]}', fontsize=12)
+        ax.set_xlabel(
+            f'{subplot_labels[idx]} {metric} Drop Rate on {split_display[split]}',
+            fontsize=20,
+            labelpad=10,
+        )
         ax.set_xticks(x)
-        ax.set_xticklabels(x_tick_labels, rotation=0, ha='center', fontsize=12)
+        ax.set_xticklabels(
+            [attack_display[m] for m in attack_methods],
+            rotation=0,
+            ha="center",
+            fontsize=18,
+        )
         ax.axhline(y=0, color='gray', linestyle='--', linewidth=0.5)
-        ax.yaxis.grid(True, linestyle='--', alpha=0.4, color='gray', linewidth=0.5)
-        ax.margins(x=0.06)
+        ax.yaxis.grid(True, linestyle='--', alpha=0.5, color='gray', linewidth=0.5)
         ax.set_axisbelow(True)
-        ax.set_ylabel('Drop Rate (%)', fontsize=12, labelpad=1)
-        ax.tick_params(axis='y', labelsize=12)
+        ax.set_ylabel('Drop Rate (%)', fontsize=20, labelpad=4)
+        ax.margins(x=0.06, y=0.03)
+        base_tops = [35, 40, 50]
+        upper = max(base_tops[idx], max_with_error + 2.0)
+        ax.set_ylim(0, upper)
 
     # Shared legend
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 0.985),
-               ncol=n_models, frameon=False, columnspacing=0.45,
-               fontsize=12, handlelength=1.4, handleheight=1.2, handletextpad=0.3)
+    fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 1.02),
+               ncol=n_models, frameon=False, columnspacing=1.0,
+               fontsize=22, handlelength=2, handleheight=1.5)
 
     plt.tight_layout()
-    plt.subplots_adjust(top=0.92, bottom=0.14, wspace=0.22)
-
+    plt.subplots_adjust(top=0.80, bottom=0.24, wspace=0.20)
     os.makedirs("figures", exist_ok=True)
-    plt.savefig('figures/pag_msmarco_3splits_decrease_rate.pdf',
-                bbox_inches='tight', pad_inches=0.02)
-    plt.savefig('figures/pag_msmarco_3splits_decrease_rate.png', dpi=600,
-                bbox_inches='tight', pad_inches=0.02)
+    plt.savefig("figures/pag_msmarco_3splits_decrease_rate.pdf", bbox_inches="tight", pad_inches=0.02)
+    plt.savefig("figures/pag_msmarco_3splits_decrease_rate.png", dpi=600, bbox_inches="tight", pad_inches=0.02)
     plt.close()
     print("\nSaved: figures/pag_msmarco_3splits_decrease_rate.pdf & .png")
 
     return pag_data, pag_decrease_rate
-
 
 
 if __name__ == "__main__":
