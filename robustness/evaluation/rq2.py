@@ -103,6 +103,12 @@ def evaluate_single(
     eval_only: bool = False,
     lex_topk: int = 1000,
     smt_topk: int = 100,
+    collapse_metric: Optional[str] = None,
+    collapse_tau: Optional[float] = None,
+    collapse_tau_percentile: float = 10.0,
+    collapse_delta: float = 0.05,
+    collapse_sensitivity_tau_percentiles: Optional[List[float]] = None,
+    collapse_sensitivity_deltas: Optional[List[float]] = None,
 ) -> Dict:
     """
     Run the full RQ2 evaluation for one (split, attack_method, seed) triple.
@@ -348,26 +354,38 @@ def evaluate_single(
                         if n_val is not None and sw_val is not None:
                             per_query[qid][f"PlanSwapDrop_{m}"] = n_val - sw_val
 
-            # Plan collapse classification (default: τ from 10th percentile, δ=0.05)
-            primary_metric = "NDCG@10" if split in ("dl19", "dl20") else "MRR@10"
+            # Plan collapse classification
+            primary_metric = collapse_metric or (
+                "NDCG@10" if split in ("dl19", "dl20") else "MRR@10"
+            )
             collapse_info = classify_plan_collapse(
                 cand_overlap_per_query=per_query,
                 tok_jaccard_per_query=pi_per_query,
                 clean_lex_pq=clean_lex_pq,
                 pert_lex_pq=pert_lex_pq,
                 metric_name=primary_metric,
-                tau=None,  # derive from 10th percentile
-                delta=0.05,
-                tau_percentile=10.0,
+                tau=collapse_tau,
+                delta=collapse_delta,
+                tau_percentile=collapse_tau_percentile,
             )
             result["plan_collapse"]["collapse_rate"] = collapse_info["collapse_rate"]
             result["plan_collapse"]["n_collapsed"] = collapse_info["n_collapsed"]
             result["plan_collapse"]["tau"] = collapse_info["tau"]
             result["plan_collapse"]["delta"] = collapse_info["delta"]
+            result["plan_collapse"]["metric"] = primary_metric
+            result["plan_collapse"]["tau_percentile"] = collapse_tau_percentile
+            result["plan_collapse"]["tau_source"] = (
+                "explicit" if collapse_tau is not None else "cand_overlap_percentile"
+            )
 
             # Mark per-query collapsed flag
             for qid in per_query:
                 per_query[qid]["collapsed"] = collapse_info["collapsed"].get(qid, False)
+                per_query[qid]["low_stability"] = collapse_info["low_stability"].get(qid, False)
+                per_query[qid]["delta_simulonly"] = collapse_info["delta_simulonly"].get(qid, 0.0)
+                per_query[qid][f"delta_simulonly_{primary_metric}"] = (
+                    collapse_info["delta_simulonly"].get(qid, 0.0)
+                )
 
             # Sensitivity ablation over (τ_percentile, δ)
             sensitivity = plan_collapse_sensitivity(
@@ -376,6 +394,8 @@ def evaluate_single(
                 clean_lex_pq=clean_lex_pq,
                 pert_lex_pq=pert_lex_pq,
                 metric_name=primary_metric,
+                tau_percentiles=collapse_sensitivity_tau_percentiles,
+                deltas=collapse_sensitivity_deltas,
             )
             sens_path = os.path.join(pert_output, "plan_collapse_sensitivity.json")
             with open(sens_path, "w") as f:
@@ -442,7 +462,7 @@ def evaluate_single(
 # Summary writing
 # ---------------------------------------------------------------------------
 
-def write_summary(results: List[Dict], output_dir: str, split_tag: str | None = None):
+def write_summary(results: List[Dict], output_dir: str, split_tag: Optional[str] = None):
     """Write summary.json and summary.csv (optionally split-tagged)."""
     os.makedirs(output_dir, exist_ok=True)
 
@@ -512,7 +532,10 @@ def write_summary(results: List[Dict], output_dir: str, split_tag: str | None = 
         # Plan collapse classification
         row["collapse_rate"] = pc.get("collapse_rate")
         row["n_collapsed"] = pc.get("n_collapsed")
+        row["collapse_metric"] = pc.get("metric")
         row["collapse_tau"] = pc.get("tau")
+        row["collapse_tau_percentile"] = pc.get("tau_percentile")
+        row["collapse_tau_source"] = pc.get("tau_source")
         row["collapse_delta"] = pc.get("delta")
 
         # SeqGain (Table 2)
@@ -620,11 +643,64 @@ def parse_args():
         default=100,
         help="Top-K for sequential decoder (Stage 2).",
     )
+    parser.add_argument(
+        "--collapse_metric",
+        type=str,
+        default="auto",
+        help="Metric for plan-collapse ΔM test: NDCG@10, MRR@10, or auto.",
+    )
+    parser.add_argument(
+        "--collapse_tau",
+        type=float,
+        default=None,
+        help="Optional explicit τ threshold for CandOverlap/TokJaccard.",
+    )
+    parser.add_argument(
+        "--collapse_tau_percentile",
+        type=float,
+        default=10.0,
+        help="Percentile for deriving τ from CandOverlap when --collapse_tau is not set.",
+    )
+    parser.add_argument(
+        "--collapse_delta",
+        type=float,
+        default=0.05,
+        help="Absolute drop threshold δ for ΔM_SimulOnly <= -δ.",
+    )
+    parser.add_argument(
+        "--collapse_sensitivity_tau_percentiles",
+        type=str,
+        default="5,10,15,20,25",
+        help="Comma-separated τ percentiles for sensitivity sweep.",
+    )
+    parser.add_argument(
+        "--collapse_sensitivity_deltas",
+        type=str,
+        default="0.01,0.03,0.05,0.10",
+        help="Comma-separated δ values for sensitivity sweep.",
+    )
     return parser.parse_args()
+
+
+def _parse_float_list(raw: Optional[str]) -> Optional[List[float]]:
+    if raw is None:
+        return None
+    values = [v.strip() for v in raw.split(",") if v.strip()]
+    return [float(v) for v in values] if values else None
 
 
 def main():
     args = parse_args()
+
+    collapse_metric = None if args.collapse_metric == "auto" else args.collapse_metric
+    if collapse_metric is not None and collapse_metric not in {"NDCG@10", "MRR@10"}:
+        raise ValueError(
+            f"Invalid --collapse_metric={collapse_metric!r}; use auto, NDCG@10, or MRR@10."
+        )
+    collapse_sensitivity_tau_percentiles = _parse_float_list(
+        args.collapse_sensitivity_tau_percentiles
+    )
+    collapse_sensitivity_deltas = _parse_float_list(args.collapse_sensitivity_deltas)
 
     # Resolve 'all' values
     splits = SPLIT_TO_DATASET.keys() if args.split == "all" else [args.split]
@@ -656,6 +732,12 @@ def main():
                     eval_only=args.eval_only,
                     lex_topk=args.lex_topk,
                     smt_topk=args.smt_topk,
+                    collapse_metric=collapse_metric,
+                    collapse_tau=args.collapse_tau,
+                    collapse_tau_percentile=args.collapse_tau_percentile,
+                    collapse_delta=args.collapse_delta,
+                    collapse_sensitivity_tau_percentiles=collapse_sensitivity_tau_percentiles,
+                    collapse_sensitivity_deltas=collapse_sensitivity_deltas,
                 )
                 all_results.append(result)
 

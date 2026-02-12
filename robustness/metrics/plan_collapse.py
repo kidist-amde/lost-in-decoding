@@ -387,12 +387,14 @@ def classify_plan_collapse(
     Returns
     -------
     dict with:
-      - ``"collapsed"``     : {qid: bool}
-      - ``"tau"``           : float (threshold used)
-      - ``"delta"``         : float
-      - ``"n_collapsed"``   : int
-      - ``"collapse_rate"`` : float (n_collapsed / n_queries)
-      - ``"n_queries"``     : int
+      - ``"collapsed"``      : {qid: bool}
+      - ``"low_stability"``  : {qid: bool}
+      - ``"delta_simulonly"``: {qid: float}, where ΔM = M(q̃)-M(q)
+      - ``"tau"``            : float (threshold used)
+      - ``"delta"``          : float
+      - ``"n_collapsed"``    : int
+      - ``"collapse_rate"``  : float (n_collapsed / n_queries)
+      - ``"n_queries"``      : int
     """
     common_qids = sorted(
         set(cand_overlap_per_query) & set(clean_lex_pq) & set(pert_lex_pq)
@@ -404,6 +406,8 @@ def classify_plan_collapse(
         tau = float(np.percentile(cand_jaccards, tau_percentile)) if cand_jaccards else 0.0
 
     collapsed: Dict[str, bool] = {}
+    low_stability: Dict[str, bool] = {}
+    delta_simulonly: Dict[str, float] = {}
     for qid in common_qids:
         cand_below = cand_overlap_per_query[qid]["jaccard"] < tau
         tok_below = False
@@ -411,16 +415,20 @@ def classify_plan_collapse(
             tok_below = tok_jaccard_per_query[qid]["jaccard"] < tau
 
         overlap_trigger = cand_below or tok_below
+        low_stability[qid] = overlap_trigger
 
         clean_m = clean_lex_pq.get(qid, {}).get(metric_name, 0.0)
         pert_m = pert_lex_pq.get(qid, {}).get(metric_name, 0.0)
         delta_m = pert_m - clean_m  # ΔM_SimulOnly = M(q̃) - M(q)
+        delta_simulonly[qid] = delta_m
 
         collapsed[qid] = overlap_trigger and (delta_m <= -delta)
 
     n_collapsed = sum(collapsed.values())
     return {
         "collapsed": collapsed,
+        "low_stability": low_stability,
+        "delta_simulonly": delta_simulonly,
         "tau": tau,
         "delta": delta,
         "n_collapsed": n_collapsed,

@@ -70,10 +70,12 @@ coverage.xml
 .pytest_cache/
 cover/
 tools/excel_results/
+tools/generate_plan_collapse_report.py
+tools/compute_plan_collapse.py
 # Translations
 *.mo
 *.pot
-
+*.pdf
 # Django stuff:
 *.log
 local_settings.py

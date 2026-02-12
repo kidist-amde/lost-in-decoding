@@ -133,6 +133,14 @@ Plan-stability metrics:
 - `PlanIntersect@100`: overlap of top planner token sets
 - `SeqGain`: stage-2 minus stage-1 on perturbed inputs
 - `PlanSwapDrop`: normal perturbed run vs plan-swapped decoding
+- `Plan collapse` tail events:
+  - A query is collapsed if
+    `(CandOverlap@k < tau OR TokJaccard@ell < tau) AND DeltaM_SimulOnly <= -delta`
+  - `DeltaM_SimulOnly = M(perturbed) - M(clean)` on Stage-1 (planner-only) metrics.
+  - Default `tau` is the 10th percentile of `CandOverlap@k`; default `delta=0.05`.
+  - Sensitivity sweeps over `tau` percentiles and `delta` are saved to
+    `plan_collapse_sensitivity.json`.
+  - Lower-tail summary stats (`p10`, `p25`) are reported for overlap metrics in `summary.csv`.
 
 ## Expected Outputs
 
@@ -183,6 +191,20 @@ python -m robustness.evaluation.rq2 \
   --seed 1999 \
   --eval_only \
   --output_dir experiments/RQ2_robustness
+```
+
+Plan-collapse controls (optional):
+
+```bash
+python -m robustness.evaluation.rq2 \
+  --split dl19 \
+  --attack_method mispelling \
+  --seed 1999 \
+  --collapse_metric auto \
+  --collapse_tau_percentile 10 \
+  --collapse_delta 0.05 \
+  --collapse_sensitivity_tau_percentiles 5,10,15,20,25 \
+  --collapse_sensitivity_deltas 0.01,0.03,0.05,0.10
 ```
 
 ## Common Issues
