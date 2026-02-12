@@ -159,13 +159,3 @@ python -m cross_lingual.trained_extension.train_planner_alignment \
 Same as the main repo, plus:
 - `pyyaml` (for config loading)
 - `datasets` (for mMARCO download from HuggingFace)
-
-## Attribution
-
-This extension references architectural patterns from:
-- **MGR-CSC** (Multilingual Generative Retrieval via Cross-lingual Semantic Compression) —
-  reference repository at `MGR-CSC/` in this project. No runtime dependency; ideas only.
-  No explicit license found in the MGR-CSC repository.
-- **PAG** (Planning Ahead in Generative Retrieval) — the base model and all frozen artifacts.
-  Planner token extraction reuses the exact RQ2 code path from
-  `robustness/utils/pag_inference.py:extract_planner_tokens`.

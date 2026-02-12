@@ -189,7 +189,7 @@ ls experiments/RQ3_crosslingual/summary*.csv
 
 - `robustness/README.md`: perturbation generation, RQ2 pipeline, dense-attack evaluation.
 - `cross_lingual/README.md`: mMARCO setup, RQ3 execution, diagnostics, aggregation.
-- `cross_lingual/trained_extension/README.md`: optional trained extension workflow.
+- `cross_lingual/trained_extension/README.md`: Trained extension workflow.
 
 ## License
 
