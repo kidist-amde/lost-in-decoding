@@ -82,49 +82,69 @@ Even if retrieval does not improve, all diagnostics and tables are reported.
 ## Directory Structure
 
 ```
-cross_lingual/trained_extension/
-├── __init__.py
-├── data_loader_parallel.py      # Parallel (q_en, q_lang) pairs with alignment validation
-├── extract_planner_tokens.py    # Reuses exact RQ2 extraction code path
-├── train_planner_alignment.py   # KL distillation training loop
-├── evaluate_adapted.py          # Evaluation matching baseline protocol
-├── run_rq3_trained_extension.sh # Master runner script
-├── configs/
-│   └── default.yaml             # Default training config
-├── checkpoints/                 # Saved model checkpoints (per language)
-│   └── {lang}/best/             # Best checkpoint by TokJaccard@100
-├── results/                     # Training logs, metrics, summary CSV
-│   ├── summary_rq3_trained.csv  # Combined results table
-│   └── {lang}/training_log.json
-└── README.md
+cross_lingual/
+├── scripts/
+│   ├── run_rq3_trained.sh          # SLURM launcher (submits one job per language)
+│   └── run_rq3_trained_sub.sh      # Per-language SLURM job (data prep → train → eval)
+└── trained_extension/
+    ├── __init__.py
+    ├── data_loader_parallel.py      # Parallel (q_en, q_lang) pairs with alignment validation
+    ├── extract_planner_tokens.py    # Reuses exact RQ2 extraction code path
+    ├── train_planner_alignment.py   # KL distillation training loop
+    ├── evaluate_adapted.py          # Evaluation matching baseline protocol
+    ├── run_rq3_trained_extension.sh # Sequential master runner (alternative)
+    ├── configs/
+    │   └── default.yaml             # Default training config
+    ├── checkpoints/                 # Saved model checkpoints (per language)
+    │   └── {lang}/best/             # Best checkpoint by TokJaccard@100
+    ├── results/                     # Training logs, metrics, summary CSV
+    │   ├── summary_rq3_trained.csv  # Combined results table
+    │   └── {lang}/training_log.json
+    └── README.md
 ```
 
 ## How to Run
 
-### Quick start (single language)
+### SLURM — parallel per-language jobs (recommended)
+
+Submits one H100 job per language (4 jobs total). Each job runs all 3 steps
+(data prep → train → evaluate) independently. Results land in
+`experiments/RQ3_crosslingual_trained/<lang>/adapted/`.
+
+```bash
+# All languages (fr, de, zh, nl)
+./cross_lingual/scripts/run_rq3_trained.sh all
+
+# Single language
+./cross_lingual/scripts/run_rq3_trained.sh fr
+
+# Two languages
+./cross_lingual/scripts/run_rq3_trained.sh "fr de"
+```
+
+Monitor with `squeue -u $USER`. Logs at `experiments/RQ3_crosslingual_trained/logs/trained_<lang>_<jobid>.{log,err}`.
+
+### SLURM — sequential single job (alternative)
+
+Runs all languages sequentially in one job. Includes a Step 4 (aggregate + significance).
+
+```bash
+sbatch --gpus=1 --time=24:00:00 --mem=180G \
+    cross_lingual/trained_extension/run_rq3_trained_extension.sh
+
+# With overrides
+sbatch --gpus=1 --time=24:00:00 --mem=180G \
+    cross_lingual/trained_extension/run_rq3_trained_extension.sh \
+    --languages "fr de" --epochs 5 --lr 1e-5 --batch_size 8 --temperature 2.0
+```
+
+### Quick start (single language, no SLURM)
 ```bash
 python -m cross_lingual.trained_extension.train_planner_alignment \
     --language fr --epochs 3 --lr 1e-5 --temperature 2.0
 
 python -m cross_lingual.trained_extension.evaluate_adapted \
     --language fr --significance
-```
-
-### Full pipeline (all languages)
-```bash
-bash cross_lingual/trained_extension/run_rq3_trained_extension.sh
-```
-
-### With custom config
-```bash
-bash cross_lingual/trained_extension/run_rq3_trained_extension.sh \
-    --languages "fr de" --epochs 5 --lr 1e-5 --batch_size 8 --temperature 2.0
-```
-
-### SLURM submission
-```bash
-sbatch --gpus=1 --time=24:00:00 --mem=64G \
-    cross_lingual/trained_extension/run_rq3_trained_extension.sh
 ```
 
 ### Compute-bounded mode

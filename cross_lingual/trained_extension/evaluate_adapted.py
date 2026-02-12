@@ -310,22 +310,28 @@ def _run_stage1_with_checkpoint(
     topk: int = 1000,
     batch_size: int = 8,
 ) -> Tuple[int, float]:
-    """Run Stage 1 with a specific checkpoint (adapted model)."""
+    """Run Stage 1 with a specific checkpoint (adapted model).
+
+    Matches robustness.utils.pag_inference.run_lexical_retrieval exactly.
+    """
     from robustness.utils.pag_inference import _run_cmd, LEX_DOCID_PATH
 
     os.makedirs(lex_out_dir, exist_ok=True)
     q_collection_paths = json.dumps([query_dir])
 
+    eval_qrel_json = json.dumps([None])
     cmd = [
         sys.executable, "-m", "t5_pretrainer.evaluate",
         f"--pretrained_path={pretrained_path}",
         f"--out_dir={lex_out_dir}",
+        f"--lex_out_dir={lex_out_dir}",
         "--task=lexical_constrained_retrieve_and_rerank",
         f"--q_collection_paths={q_collection_paths}",
         f"--batch_size={batch_size}",
         f"--topk={topk}",
         f"--lex_docid_to_smtid_path={LEX_DOCID_PATH}",
         "--max_length=128",
+        f"--eval_qrel_path={eval_qrel_json}",
     ]
 
     t0 = time.time()
@@ -343,11 +349,17 @@ def _run_stage2_with_checkpoint(
     batch_size: int = 16,
     n_gpu: int = 1,
 ) -> Tuple[int, float]:
-    """Run Stage 2 with a specific checkpoint (adapted model)."""
-    from robustness.utils.pag_inference import _run_cmd, SMT_DOCID_PATH
+    """Run Stage 2 with a specific checkpoint (adapted model).
+
+    Matches robustness.utils.pag_inference.run_sequential_decoding exactly.
+    """
+    from robustness.utils.pag_inference import (
+        _run_cmd, LEX_DOCID_PATH, SMT_DOCID_PATH,
+    )
 
     os.makedirs(smt_out_dir, exist_ok=True)
     q_collection_paths = json.dumps([query_dir])
+    eval_qrel_json = json.dumps([None])
     master_port = os.environ.get("MASTER_PORT", "29500")
 
     cmd = [
@@ -357,15 +369,17 @@ def _run_stage2_with_checkpoint(
         "-m", "t5_pretrainer.evaluate",
         f"--pretrained_path={pretrained_path}",
         f"--out_dir={smt_out_dir}",
+        f"--lex_out_dir={lex_out_dir}",
         "--task=lexical_constrained_retrieve_and_rerank_2",
         f"--q_collection_paths={q_collection_paths}",
         f"--batch_size={batch_size}",
         f"--topk={topk}",
+        f"--lex_docid_to_smtid_path={LEX_DOCID_PATH}",
         f"--smt_docid_to_smtid_path={SMT_DOCID_PATH}",
-        f"--lex_docid_to_smtid_path=/dev/null",
-        f"--run_json_dir={lex_out_dir}",
         "--max_length=128",
         "--max_new_token_for_docid=8",
+        "--lex_constrained=lexical_tmp_rescore",
+        f"--eval_qrel_path={eval_qrel_json}",
     ]
 
     t0 = time.time()

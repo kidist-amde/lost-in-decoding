@@ -25,6 +25,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import sys
 import time
 from copy import deepcopy
@@ -47,6 +48,19 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+TOKENIZER_FILES = [
+    "spiece.model", "tokenizer.json",
+    "special_tokens_map.json", "tokenizer_config.json",
+]
+
+
+def _copy_tokenizer(src_dir: str, dst_dir: str):
+    """Copy tokenizer files from source checkpoint to saved checkpoint."""
+    for fname in TOKENIZER_FILES:
+        src = os.path.join(src_dir, fname)
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(dst_dir, fname))
 
 
 # ---------------------------------------------------------------------------
@@ -592,6 +606,7 @@ def train(config: Dict):
                         best_jaccard = eval_metrics["tok_jaccard_mean"]
                         best_dir = output_dir / "best"
                         student.save_pretrained(str(best_dir))
+                        _copy_tokenizer(config["pretrained_path"], str(best_dir))
                         logger.info(
                             f"New best TokJaccard: {best_jaccard:.4f} -> {best_dir}"
                         )
@@ -602,6 +617,7 @@ def train(config: Dict):
                 if global_step % config["save_interval"] == 0:
                     step_dir = output_dir / f"step_{global_step}"
                     student.save_pretrained(str(step_dir))
+                    _copy_tokenizer(config["pretrained_path"], str(step_dir))
 
         # End of epoch eval
         eval_metrics = evaluate_alignment(
@@ -620,6 +636,7 @@ def train(config: Dict):
             best_jaccard = eval_metrics["tok_jaccard_mean"]
             best_dir = output_dir / "best"
             student.save_pretrained(str(best_dir))
+            _copy_tokenizer(config["pretrained_path"], str(best_dir))
             logger.info(f"New best TokJaccard: {best_jaccard:.4f} -> {best_dir}")
 
         student.train()
@@ -627,6 +644,7 @@ def train(config: Dict):
     # Save final checkpoint
     final_dir = output_dir / "final"
     student.save_pretrained(str(final_dir))
+    _copy_tokenizer(config["pretrained_path"], str(final_dir))
     logger.info(f"Final checkpoint -> {final_dir}")
 
     # Save training log

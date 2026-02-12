@@ -286,12 +286,13 @@ def evaluate_single(
         tokens_dir = lang_output / "planner_tokens"
         tokens_dir.mkdir(parents=True, exist_ok=True)
 
-        english_tokens, target_tokens = extract_crosslingual_planner_tokens(
+        english_tokens, target_tokens, translated_tokens = extract_crosslingual_planner_tokens(
             english_query_dir=str(english_dir),
             target_query_dir=str(target_dir),
             output_dir=str(tokens_dir),
             topk=100,
             batch_size=batch_size,
+            translated_query_dir=str(translated_dir),
         )
 
     # ── 8. Compute all metrics from run files ─────────────────────────────
@@ -379,10 +380,21 @@ def evaluate_single(
                 english_lex_run, naive_lex_run, qrels, k=10
             )
 
-        # Token overlap
+        # Token overlap: English vs target (naive)
         if english_tokens and target_tokens:
             result["token_overlap"] = crosslingual_token_overlap(
                 english_tokens, target_tokens
+            )
+
+        # Token overlap: English vs translated (System C)
+        translated_tokens_path = tokens_dir / "translated_planner_tokens.json"
+        if translated_tokens_path.exists():
+            translated_tokens = load_planner_tokens(str(translated_tokens_path))
+        else:
+            translated_tokens = None
+        if english_tokens and translated_tokens:
+            result["trans_token_overlap"] = crosslingual_token_overlap(
+                english_tokens, translated_tokens
             )
 
         # PAG gain comparison
@@ -538,6 +550,11 @@ def write_summary(results: List[Dict], output_dir: str, tag: str = ""):
         if "aggregate" in to:
             row["token_jaccard_mean"] = to["aggregate"].get("mean_jaccard")
             row["token_jaccard_median"] = to["aggregate"].get("median_jaccard")
+
+        tto = r.get("trans_token_overlap", {})
+        if "aggregate" in tto:
+            row["trans_token_jaccard_mean"] = tto["aggregate"].get("mean_jaccard")
+            row["trans_token_jaccard_median"] = tto["aggregate"].get("median_jaccard")
 
         ps = r.get("plan_swap_impact", {})
         row["PlanSwap_Gain_NDCG@10"] = ps.get("PlanSwap_Gain_NDCG@10")

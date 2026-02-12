@@ -174,6 +174,7 @@ def _run_sequential_unconstrained(
         f"--batch_size={batch_size}",
         f"--topk={topk}",
         f"--smt_docid_to_smtid_path={SMT_DOCID_PATH}",
+        f"--docid_to_tokenids_path={SMT_DOCID_PATH}",
         f"--max_length={max_length}",
         f"--max_new_token_for_docid={max_new_token}",
     ]
@@ -433,11 +434,17 @@ def extract_crosslingual_planner_tokens(
     output_dir: str,
     topk: int = 100,
     batch_size: int = 8,
-) -> Tuple[Dict, Dict]:
+    translated_query_dir: Optional[str] = None,
+) -> Tuple[Dict, Dict, Optional[Dict]]:
     """
-    Extract planner tokens for both English and target language queries.
+    Extract planner tokens for English, target language, and optionally
+    translated queries.
 
     This enables analysis of token-plan overlap between languages.
+
+    Returns:
+        (english_tokens, target_tokens, translated_tokens)
+        translated_tokens is None if translated_query_dir is not provided.
     """
     english_tokens_path = os.path.join(output_dir, "english_planner_tokens.json")
     target_tokens_path = os.path.join(output_dir, "target_planner_tokens.json")
@@ -463,4 +470,19 @@ def extract_crosslingual_planner_tokens(
     english_tokens = load_planner_tokens(english_tokens_path)
     target_tokens = load_planner_tokens(target_tokens_path)
 
-    return english_tokens, target_tokens
+    # Extract translated query tokens (for System C diagnostics)
+    translated_tokens = None
+    if translated_query_dir:
+        translated_tokens_path = os.path.join(
+            output_dir, "translated_planner_tokens.json"
+        )
+        if not os.path.exists(translated_tokens_path):
+            extract_planner_tokens(
+                query_dir=translated_query_dir,
+                out_path=translated_tokens_path,
+                topk=topk,
+                batch_size=batch_size,
+            )
+        translated_tokens = load_planner_tokens(translated_tokens_path)
+
+    return english_tokens, target_tokens, translated_tokens

@@ -29,6 +29,15 @@ MMARCO_HF_REPO = "unicamp-dl/mmarco"
 # Languages for RQ3 cross-lingual evaluation
 RQ3_LANGUAGES = ["zh", "nl", "fr", "de"]
 
+# ISO code -> HuggingFace mMARCO config name (full language name)
+LANG_CODE_TO_HF_NAME = {
+    "zh": "chinese",
+    "nl": "dutch",
+    "fr": "french",
+    "de": "german",
+    "en": "english",
+}
+
 # MS MARCO dev-small queries (the only split we use for RQ3)
 DEV_QUERY_PATH = DATA_ROOT / "dev_queries" / "raw.tsv"
 DEV_QREL_PATH = DATA_ROOT / "dev_qrel.json"
@@ -66,10 +75,39 @@ def load_qrels() -> Dict[str, Dict[str, int]]:
 # mMARCO query download and loading
 # ---------------------------------------------------------------------------
 
+def _load_queries_from_arrow(builder, output_path: Path) -> int:
+    """Read arrow files produced by a datasets builder and write a TSV.
+
+    Returns the number of unique queries written.
+    """
+    import pyarrow as pa
+
+    seen_qids: set = set()
+    n_written = 0
+    with open(output_path, "w") as f:
+        for arrow_name in ["mmarco-train.arrow", "mmarco-dev.arrow",
+                           "mmarco-dev.full.arrow"]:
+            arrow_path = os.path.join(builder.cache_dir, arrow_name)
+            if not os.path.exists(arrow_path):
+                continue
+            table = pa.ipc.open_stream(arrow_path).read_all()
+            for i in range(len(table)):
+                qid = str(table.column("id")[i].as_py())
+                if qid in seen_qids:
+                    continue
+                seen_qids.add(qid)
+                text = str(table.column("text")[i].as_py()).replace("\t", " ").replace("\n", " ")
+                f.write(f"{qid}\t{text}\n")
+                n_written += 1
+            print(f"[data_loader]   {arrow_name}: {len(table)} rows")
+    return n_written
+
+
 def download_mmarco_queries(language: str, force: bool = False) -> Path:
     """Download mMARCO queries for *language* from HuggingFace.
 
     Caches to cross_lingual/data/mmarco/{lang}/queries.tsv.
+    Uses load_dataset_builder + pyarrow (avoids trust_remote_code issues).
     Returns the directory containing the downloaded file.
     """
     if language not in RQ3_LANGUAGES:
@@ -85,23 +123,16 @@ def download_mmarco_queries(language: str, force: bool = False) -> Path:
         print(f"[data_loader] {language} queries already cached at {queries_file}")
         return output_dir
 
-    from datasets import load_dataset
+    from datasets import load_dataset_builder
 
-    print(f"[data_loader] Downloading {language} queries from {MMARCO_HF_REPO}...")
-    dataset = load_dataset(
-        MMARCO_HF_REPO,
-        f"queries-{language}",
-        split="train",
-        trust_remote_code=True,
-    )
+    hf_name = LANG_CODE_TO_HF_NAME.get(language, language)
+    print(f"[data_loader] Downloading {language} ({hf_name}) queries from {MMARCO_HF_REPO}...")
 
-    with open(queries_file, "w") as f:
-        for row in dataset:
-            qid = str(row["id"])
-            text = row["text"].replace("\t", " ").replace("\n", " ")
-            f.write(f"{qid}\t{text}\n")
+    builder = load_dataset_builder(MMARCO_HF_REPO, f"queries-{hf_name}")
+    builder.download_and_prepare()
 
-    print(f"[data_loader] Saved {len(dataset)} queries -> {queries_file}")
+    n_written = _load_queries_from_arrow(builder, queries_file)
+    print(f"[data_loader] Saved {n_written} unique queries -> {queries_file}")
     return output_dir
 
 

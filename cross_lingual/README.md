@@ -100,8 +100,8 @@ sbatch cross_lingual/scripts/translate_queries.sh
 ### 3. Run Evaluation
 
 ```bash
-# All languages, all splits (submits 12 SLURM jobs)
-./cross_lingual/scripts/run_rq3_pipeline.sh
+# All languages, all splits (submits 4 SLURM jobs)
+./cross_lingual/scripts/run_rq3_pipeline.sh all dev
 
 # Single language/split
 ./cross_lingual/scripts/run_rq3_pipeline.sh fr dev

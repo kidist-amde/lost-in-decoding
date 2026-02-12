@@ -214,9 +214,8 @@ def lexical_condition_decode_doc(model,
                     print(f"smtid: {smtid} not in smtid_to_docid")
                 else:
                     for docid in smtid_to_docids[smtid]:
-                        # out_qid_to_rankdata[qid][docid] = rel_score * max_new_token
+                        out_qid_to_rankdata[qid][docid] = rel_score * max_new_token
                         # FOR ABLATION STUDY: without multiplying by max_new_token
-                        out_qid_to_rankdata[qid][docid] = rel_score
 
                     
     out_path = os.path.join(out_dir, f"run_{local_rank}.json")
@@ -271,9 +270,9 @@ def lexical_inc_decode_doc(model,
                     print(f"smtid: {smtid} not in smtid_to_docid")
                 else:
                     for docid in smtid_to_docids[smtid]:
-                        # out_qid_to_rankdata[qid][docid] = rel_score * max_new_token
+                        out_qid_to_rankdata[qid][docid] = rel_score * max_new_token
                         # FOR ABLATION STUDY: without multiplying by max_new_token
-                        out_qid_to_rankdata[qid][docid] = rel_score
+                        # out_qid_to_rankdata[qid][docid] = rel_score
                     
     out_path = os.path.join(out_dir, f"run_{local_rank}.json")
     with open(out_path, "w") as fout:
@@ -330,9 +329,8 @@ def lexical_tmp_rescore_decode_doc(model,
                     print(f"smtid: {smtid} not in smtid_to_docid")
                 else:
                     for docid in smtid_to_docids[smtid]:
-                        # out_qid_to_rankdata[qid][docid] = rel_score + lex_qid_to_smtid_to_score[str(qid)][str(smtid)]
-                        ## FOR ABLATION STUDY: without multiplying by max_new_token
-                        out_qid_to_rankdata[qid][docid] = rel_score
+                        # Default setting: combine sequential decoding score with lexical score.
+                        out_qid_to_rankdata[qid][docid] = rel_score + lex_qid_to_smtid_to_score[str(qid)][str(smtid)]
                     
     out_path = os.path.join(out_dir, f"run_{local_rank}.json")
     with open(out_path, "w") as fout:
@@ -1541,35 +1539,34 @@ def lexical_constrained_retrieve_and_rerank_3(args):
     for data_dir in args.q_collection_paths:
         out_dir = os.path.join(args.out_dir, get_dataset_name(data_dir))
 
-        # remove old 
-        if os.path.exists(os.path.join(out_dir, "run.json")):
-            print("old run.json exisit.")
-            os.remove(os.path.join(out_dir, "run.json"))
-        
-        # merge
+        # Merge per-rank shards when present; otherwise reuse existing merged run.
         qid_to_rankdata = {}
-        sub_paths = [p for p in os.listdir(out_dir) if "run" in p]
-        assert len(sub_paths) > 0, f"No run files found in {out_dir}"
-        for sub_path in sub_paths:
-            with open(os.path.join(out_dir, sub_path)) as fin:
-                sub_qid_to_rankdata = ujson.load(fin)
-            if len(qid_to_rankdata) == 0:
-                qid_to_rankdata.update(sub_qid_to_rankdata)
-            else:
-                for qid, rankdata in sub_qid_to_rankdata.items():
-                    if qid not in qid_to_rankdata:
-                        qid_to_rankdata[qid] = rankdata
-                    else:
-                        qid_to_rankdata[qid].update(rankdata)
-        print("length of pids and avg rankdata length in qid_to_rankdata: {}, {}".format(
-        len(qid_to_rankdata), np.mean([len(xs) for xs in qid_to_rankdata.values()])))
+        run_path = os.path.join(out_dir, "run.json")
+        sub_paths = [p for p in os.listdir(out_dir) if p.startswith("run_") and p.endswith(".json")]
 
-        with open(os.path.join(out_dir, "run.json"), "w") as fout:
-            ujson.dump(qid_to_rankdata, fout)
+        if len(sub_paths) > 0:
+            for sub_path in sub_paths:
+                with open(os.path.join(out_dir, sub_path)) as fin:
+                    sub_qid_to_rankdata = ujson.load(fin)
+                if len(qid_to_rankdata) == 0:
+                    qid_to_rankdata.update(sub_qid_to_rankdata)
+                else:
+                    for qid, rankdata in sub_qid_to_rankdata.items():
+                        if qid not in qid_to_rankdata:
+                            qid_to_rankdata[qid] = rankdata
+                        else:
+                            qid_to_rankdata[qid].update(rankdata)
+            print("length of pids and avg rankdata length in qid_to_rankdata: {}, {}".format(
+            len(qid_to_rankdata), np.mean([len(xs) for xs in qid_to_rankdata.values()])))
 
-        for sub_path in sub_paths:
-            sub_path = os.path.join(out_dir, sub_path)
-            os.remove(sub_path)
+            with open(run_path, "w") as fout:
+                ujson.dump(qid_to_rankdata, fout)
+
+            for sub_path in sub_paths:
+                os.remove(os.path.join(out_dir, sub_path))
+        else:
+            assert os.path.exists(run_path), f"No run files found in {out_dir}"
+            print(f"No shard run files found in {out_dir}; using existing run.json")
 
     evaluate(args)
 
