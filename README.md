@@ -1,6 +1,7 @@
-[![SIGIR 2026](https://img.shields.io/badge/SIGIR-2026-blue)](#)
+[![SIGIR 2026](https://img.shields.io/badge/SIGIR-2026-blue)](https://sigir2026.org/en-AU/pages/submissions/reproducibility-track)
 [![Submission](https://img.shields.io/badge/submission-298-informational)](#)
 [![License](https://img.shields.io/badge/license-Apache%202.0-lightgrey)](LICENSE)
+[![Paper](https://img.shields.io/badge/paper-arXiv-red)](https://arxiv.org/abs/XXXX.XXXXX)
 
 # Lost in Decoding? Reproducing and Stress-Testing the Look-Ahead Prior in Generative Retrieval
 
@@ -194,3 +195,17 @@ ls experiments/RQ3_crosslingual/summary*.csv
 ## License
 
 Apache 2.0. See `LICENSE`.
+
+## Upstream Work
+
+This repository reproduces and stress-tests the **PAG (Planner-Assisted Generative retrieval)** system.
+
+**Paper:**
+> Zeng, H., & Zamani, H. (2024). *Planning Ahead in Generative Retrieval: Guiding Autoregressive
+Generation through Simultaneous Decoding.*
+> [arXiv:2404.14600](https://arxiv.org/pdf/2404.14600)
+
+**Upstream repository:**
+> [https://github.com/HansiZeng/PAG/tree/main/t5_pretrainer](https://github.com/HansiZeng/PAG/tree/main/t5_pretrainer)
+
+Our work builds directly on the released checkpoints and document identifiers from the upstream PAG repository. All three research questions (RQ1–RQ3) use the original PAG model as their baseline.

@@ -72,6 +72,9 @@ cover/
 tools/excel_results/
 tools/generate_plan_collapse_report.py
 tools/compute_plan_collapse.py
+test.sh
+cuda_version.err
+cuda_version.out
 # Translations
 *.mo
 *.pot
