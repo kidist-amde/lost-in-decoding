@@ -206,6 +206,6 @@ Generation through Simultaneous Decoding.*
 > [arXiv:2404.14600](https://arxiv.org/pdf/2404.14600)
 
 **Upstream repository:**
-> [https://github.com/HansiZeng/PAG/tree/main/t5_pretrainer](https://github.com/HansiZeng/PAG/tree/main/t5_pretrainer)
+> [https://github.com/HansiZeng/PAG](https://github.com/HansiZeng/PAG/tree/main)
 
 Our work builds directly on the released checkpoints and document identifiers from the upstream PAG repository. All three research questions (RQ1–RQ3) use the original PAG model as their baseline.
