@@ -22,22 +22,15 @@ mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate "${CONDA_ENV:-pag-env}"
 
-LANGUAGES="${1:-${LANGUAGES:-fr de zh nl}}"
+LANGUAGES="${1:-${LANGUAGES:-nl fr de zh}}"
 SPLITS="${2:-${SPLITS:-dev}}"
-MODEL="${MODEL:-microsoft/harrier-oss-v1-27b}"
-CORPUS_EMB_CACHE="${CORPUS_EMB_CACHE:-$OUTPUT_DIR/corpus_embs.npy}"
+MODEL="${MODEL:-google/embeddinggemma-300m}"
+CORPUS_EMB_CACHE="${CORPUS_EMB_CACHE:-$OUTPUT_DIR/embeddinggemma_corpus_embs.npy}"
 
-CORPUS_BATCH_SIZE="${CORPUS_BATCH_SIZE:-128}"
-QUERY_BATCH_SIZE="${QUERY_BATCH_SIZE:-128}"
-CORPUS_MAX_LENGTH="${CORPUS_MAX_LENGTH:-512}"
-QUERY_MAX_LENGTH="${QUERY_MAX_LENGTH:-128}"
-POOLING="${POOLING:-last}"
-QUERY_PREFIX="${QUERY_PREFIX:-Instruct: Given a web search query, retrieve relevant passages that answer the query
-Query: }"
-PASSAGE_PREFIX="${PASSAGE_PREFIX:-}"
+CORPUS_BATCH_SIZE="${CORPUS_BATCH_SIZE:-512}"
+QUERY_BATCH_SIZE="${QUERY_BATCH_SIZE:-512}"
 TOPK="${TOPK:-100}"
 DEVICE="${DEVICE:-cuda:0}"
-DTYPE="${DTYPE:-bfloat16}"
 FAISS_GPU="${FAISS_GPU:-1}"
 FAISS_GPU_DEVICES="${FAISS_GPU_DEVICES:-1,2,3}"
 
@@ -64,14 +57,8 @@ python -m cross_lingual.evaluation.dense_multilingual_baseline \
     --corpus_emb_cache "$CORPUS_EMB_CACHE" \
     --corpus_batch_size "$CORPUS_BATCH_SIZE" \
     --query_batch_size "$QUERY_BATCH_SIZE" \
-    --corpus_max_length "$CORPUS_MAX_LENGTH" \
-    --query_max_length "$QUERY_MAX_LENGTH" \
-    --pooling "$POOLING" \
-    --query_prefix "$QUERY_PREFIX" \
-    --passage_prefix "$PASSAGE_PREFIX" \
     --topk "$TOPK" \
     --device "$DEVICE" \
-    --dtype "$DTYPE" \
     "${FAISS_ARGS[@]}"
 
 echo "Done. Summary: $OUTPUT_DIR/summary.csv"

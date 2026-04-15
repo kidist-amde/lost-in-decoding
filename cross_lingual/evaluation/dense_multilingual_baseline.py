@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-Exact multilingual dense-retrieval baseline for RQ3.
+Exact multilingual dense baseline for RQ3 using EmbeddingGemma.
 
-The script encodes the English MS MARCO corpus once, stores the corpus
-embeddings in ``--corpus_emb_cache``, encodes target-language mMARCO queries,
-runs exact FAISS inner-product search, computes MRR@10 and NDCG@10, and writes
-summary files under:
+This script:
+  - encodes the MS MARCO English corpus in batches,
+  - caches corpus embeddings with --corpus_emb_cache,
+  - encodes mMARCO queries per language,
+  - runs exact FAISS inner-product search,
+  - computes MRR@10 and NDCG@10,
+  - writes summary.json and summary.csv in the RQ3 summary layout.
 
-    experiments/RQ3_crosslingual/dense_multilingual_baseline/
+Default query files:
+  experiments/RQ3_crosslingual/queries/msmarco_dev/{nl,fr,de,zh}/raw.tsv
 
-Example:
-    python -m cross_lingual.evaluation.dense_multilingual_baseline \
-        --model intfloat/multilingual-e5-base \
-        --languages fr de zh nl \
-        --splits dev \
-        --corpus_emb_cache experiments/RQ3_crosslingual/dense_multilingual_baseline/corpus_embs.npy
+Default outputs:
+  experiments/RQ3_crosslingual/dense_multilingual_baseline/
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ import csv
 import json
 import logging
 import math
-import os
 import sys
 import time
 from pathlib import Path
@@ -32,8 +31,6 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
-from torch import Tensor
-from transformers import AutoModel, AutoTokenizer
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,6 +46,12 @@ SPLIT_TO_DATASET = {
     "dev": "MSMARCO",
 }
 
+SPLIT_LABELS = {
+    "dl19": "TREC_DL_2019",
+    "dl20": "TREC_DL_2020",
+    "dev": "msmarco_dev",
+}
+
 SPLIT_QUERY_PATHS = {
     "dl19": DATA_ROOT / "TREC_DL_2019" / "queries_2019" / "raw.tsv",
     "dl20": DATA_ROOT / "TREC_DL_2020" / "queries_2020" / "raw.tsv",
@@ -62,12 +65,6 @@ SPLIT_QREL_PATHS = {
 }
 
 RQ3_LANGUAGES = ["nl", "fr", "de", "zh"]
-
-SPLIT_LABELS = {
-    "dl19": "TREC_DL_2019",
-    "dl20": "TREC_DL_2020",
-    "dev": "msmarco_dev",
-}
 
 ISO_TO_LANG_NAME = {
     "ar": "arabic",
@@ -141,6 +138,19 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 LOG = logging.getLogger(__name__)
+
+
+def patch_sentence_transformers_import() -> None:
+    """Support older sentence-transformers with newer huggingface_hub."""
+    try:
+        import huggingface_hub
+
+        if not hasattr(huggingface_hub, "cached_download"):
+            from huggingface_hub import hf_hub_download
+
+            huggingface_hub.cached_download = hf_hub_download
+    except Exception:
+        pass
 
 
 def numeric_qid_sort_key(qid: str) -> Tuple[int, str]:
@@ -229,7 +239,6 @@ def load_language_queries(
     download: bool,
 ) -> Tuple[List[str], List[str]]:
     english_queries = read_tsv(SPLIT_QUERY_PATHS[split])
-
     prepared_query_path = (
         REPO_ROOT
         / "experiments"
@@ -251,7 +260,7 @@ def load_language_queries(
             if not download:
                 raise FileNotFoundError(
                     f"Missing mMARCO query file: {queries_file}. "
-                    "Run with downloads enabled or pre-populate data/mmarco/<lang>/queries.tsv."
+                    "Run with downloads enabled or pre-populate the query TSVs."
                 )
             download_mmarco_queries(language)
         lang_queries = read_tsv(queries_file)
@@ -265,70 +274,64 @@ def load_language_queries(
     return qids, texts
 
 
-def mean_pool(token_embeddings: Tensor, attention_mask: Tensor) -> Tensor:
-    mask = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-    summed = torch.sum(token_embeddings * mask, dim=1)
-    denom = torch.clamp(mask.sum(dim=1), min=1e-9)
-    return summed / denom
+def load_sentence_transformer(model_name: str, device: str):
+    patch_sentence_transformers_import()
+    from sentence_transformers import SentenceTransformer
+
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        device = "cpu"
+    LOG.info("Loading SentenceTransformer %s on %s", model_name, device)
+    model = SentenceTransformer(model_name, device=device)
+    has_model_card_api = hasattr(model, "encode_query") and hasattr(model, "encode_document")
+    if not has_model_card_api:
+        LOG.warning(
+            "Installed sentence-transformers does not expose encode_query/encode_document; "
+            "falling back to normalized encode(). Upgrade sentence-transformers for exact model-card API."
+        )
+    return model, has_model_card_api
 
 
-def last_token_pool(token_embeddings: Tensor, attention_mask: Tensor) -> Tensor:
-    sequence_lengths = attention_mask.sum(dim=1) - 1
-    batch_indices = torch.arange(token_embeddings.size(0), device=token_embeddings.device)
-    return token_embeddings[batch_indices, sequence_lengths]
-
-
-def encode_texts(
-    texts: Sequence[str],
-    tokenizer,
+def encode_with_model_card_api(
     model,
-    device: torch.device,
+    texts: Sequence[str],
+    mode: str,
     batch_size: int,
-    max_length: int,
-    pooling: str,
     normalize: bool,
-    prefix: str = "",
+    show_progress: bool,
+    has_model_card_api: bool,
 ) -> np.ndarray:
     if not texts:
         return np.empty((0, 0), dtype=np.float32)
 
-    embeddings: List[np.ndarray] = []
-    model.eval()
-
-    for start in range(0, len(texts), batch_size):
-        batch = list(texts[start:start + batch_size])
-        if prefix:
-            batch = [prefix + text for text in batch]
-
-        encoded = tokenizer(
-            batch,
-            padding=True,
-            truncation=True,
-            max_length=max_length,
-            return_tensors="pt",
-        )
-        encoded = {key: value.to(device) for key, value in encoded.items()}
-
-        with torch.inference_mode():
-            output = model(**encoded)
-
-        hidden = output.last_hidden_state
-        if pooling == "last":
-            emb = last_token_pool(hidden, encoded["attention_mask"])
-        elif pooling == "mean":
-            emb = mean_pool(hidden, encoded["attention_mask"])
-        elif pooling == "cls":
-            emb = hidden[:, 0]
+    if has_model_card_api:
+        if mode == "query":
+            embeddings = model.encode_query(
+                list(texts),
+                batch_size=batch_size,
+                convert_to_numpy=True,
+                normalize_embeddings=normalize,
+                show_progress_bar=show_progress,
+            )
+        elif mode == "document":
+            embeddings = model.encode_document(
+                list(texts),
+                batch_size=batch_size,
+                convert_to_numpy=True,
+                normalize_embeddings=normalize,
+                show_progress_bar=show_progress,
+            )
         else:
-            raise ValueError(f"Unsupported pooling mode: {pooling}")
+            raise ValueError(f"Unknown encoding mode: {mode}")
+    else:
+        embeddings = model.encode(
+            list(texts),
+            batch_size=batch_size,
+            convert_to_numpy=True,
+            normalize_embeddings=normalize,
+            show_progress_bar=show_progress,
+        )
 
-        if normalize:
-            emb = torch.nn.functional.normalize(emb, p=2, dim=-1)
-
-        embeddings.append(emb.detach().cpu().float().numpy())
-        LOG.info("Encoded %d / %d texts", min(start + batch_size, len(texts)), len(texts))
-
-    return np.ascontiguousarray(np.vstack(embeddings).astype(np.float32))
+    return np.ascontiguousarray(np.asarray(embeddings, dtype=np.float32))
 
 
 def cache_sidecar(path: Path, suffix: str) -> Path:
@@ -394,7 +397,11 @@ def build_faiss_index(
     for start in range(0, embeddings.shape[0], add_batch_size):
         batch = np.ascontiguousarray(embeddings[start:start + add_batch_size], dtype=np.float32)
         index.add(batch)
-        LOG.info("Added %d / %d corpus vectors to FAISS", min(start + add_batch_size, embeddings.shape[0]), embeddings.shape[0])
+        LOG.info(
+            "Added %d / %d corpus vectors to FAISS",
+            min(start + add_batch_size, embeddings.shape[0]),
+            embeddings.shape[0],
+        )
     return index
 
 
@@ -463,52 +470,6 @@ def compute_metrics(run: Dict[str, Dict[str, float]], qrels: Dict[str, Dict[str,
     }
 
 
-def dtype_from_arg(name: str):
-    if name == "auto":
-        return "auto"
-    if name == "float32":
-        return torch.float32
-    if name == "float16":
-        return torch.float16
-    if name == "bfloat16":
-        return torch.bfloat16
-    raise ValueError(f"Unsupported dtype: {name}")
-
-
-def resolve_model_path(model_name: str) -> str:
-    if Path(model_name).exists():
-        return model_name
-    slug = model_name.replace("/", "--")
-    snapshots = Path.home() / ".cache" / "huggingface" / "hub" / f"models--{slug}" / "snapshots"
-    if snapshots.exists():
-        candidates = sorted(path for path in snapshots.iterdir() if path.is_dir())
-        if candidates:
-            return str(candidates[-1])
-    return model_name
-
-
-def load_encoder(args) -> Tuple[object, object, torch.device]:
-    device = torch.device(args.device if torch.cuda.is_available() and args.device != "cpu" else "cpu")
-    model_path = resolve_model_path(args.model)
-
-    LOG.info("Loading tokenizer: %s", model_path)
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=args.trust_remote_code)
-    if args.pooling == "last":
-        tokenizer.padding_side = "left"
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    model_kwargs = {
-        "trust_remote_code": args.trust_remote_code,
-        "torch_dtype": dtype_from_arg(args.dtype),
-    }
-    LOG.info("Loading model: %s", model_path)
-    model = AutoModel.from_pretrained(model_path, **model_kwargs)
-    model.to(device)
-    model.eval()
-    return tokenizer, model, device
-
-
 def evaluate_one(
     language: str,
     split: str,
@@ -517,23 +478,20 @@ def evaluate_one(
     qrels: Dict[str, Dict[str, int]],
     doc_ids: Sequence[str],
     faiss_index,
-    tokenizer,
     model,
-    device: torch.device,
+    has_model_card_api: bool,
     args,
     output_dir: Path,
 ) -> Dict:
-    LOG.info("Evaluating dense baseline for language=%s split=%s", language, split)
-    query_embeddings = encode_texts(
+    LOG.info("Encoding/evaluating language=%s split=%s", language, split)
+    query_embeddings = encode_with_model_card_api(
+        model,
         query_texts,
-        tokenizer=tokenizer,
-        model=model,
-        device=device,
+        mode="query",
         batch_size=args.query_batch_size,
-        max_length=args.query_max_length,
-        pooling=args.pooling,
         normalize=args.normalize,
-        prefix=args.query_prefix,
+        show_progress=args.show_progress,
+        has_model_card_api=has_model_card_api,
     )
 
     topk = min(args.topk, len(doc_ids))
@@ -604,23 +562,20 @@ def summary_row(result: Dict) -> Dict[str, object]:
 def write_summary(results: List[Dict], output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    summary_json = output_dir / "summary.json"
-    with open(summary_json, "w") as f:
+    with open(output_dir / "summary.json", "w") as f:
         json.dump(results, f, indent=2)
-    LOG.info("Wrote %s", summary_json)
 
-    summary_csv = output_dir / "summary.csv"
-    with open(summary_csv, "w", newline="") as f:
+    with open(output_dir / "summary.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=RQ3_CSV_COLUMNS)
         writer.writeheader()
         for result in results:
             writer.writerow(summary_row(result))
-    LOG.info("Wrote %s", summary_csv)
+    LOG.info("Wrote %s and %s", output_dir / "summary.json", output_dir / "summary.csv")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Exact FAISS dense multilingual baseline for RQ3")
-    parser.add_argument("--model", default="microsoft/harrier-oss-v1-27b", help="Hugging Face model ID or local path")
+    parser.add_argument("--model", default="google/embeddinggemma-300m", help="SentenceTransformer model ID or local path")
     parser.add_argument("--languages", nargs="+", default=RQ3_LANGUAGES, help="Languages to evaluate, or 'all'")
     parser.add_argument("--splits", nargs="+", default=["dev"], help="Splits to evaluate: dev, dl19, dl20, or 'all'")
     parser.add_argument(
@@ -630,32 +585,23 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--corpus_emb_cache",
-        default=str(REPO_ROOT / "experiments" / "RQ3_crosslingual" / "dense_multilingual_baseline" / "corpus_embs.npy"),
+        default=str(REPO_ROOT / "experiments" / "RQ3_crosslingual" / "dense_multilingual_baseline" / "embeddinggemma_corpus_embs.npy"),
         help="Path to cached corpus embeddings. Existing caches are loaded automatically.",
     )
     parser.add_argument("--force_corpus_reencode", action="store_true", help="Ignore an existing corpus embedding cache")
     parser.add_argument("--no_download", action="store_true", help="Do not download missing mMARCO query files")
-    parser.add_argument("--corpus_batch_size", type=int, default=128, help="Batch size for corpus encoding")
-    parser.add_argument("--query_batch_size", type=int, default=128, help="Batch size for query encoding")
-    parser.add_argument("--corpus_max_length", type=int, default=512, help="Max tokens for corpus passages")
-    parser.add_argument("--query_max_length", type=int, default=128, help="Max tokens for queries")
-    parser.add_argument("--pooling", choices=["mean", "last", "cls"], default="last", help="Embedding pooling strategy")
+    parser.add_argument("--corpus_batch_size", type=int, default=512, help="Batch size for corpus encoding")
+    parser.add_argument("--query_batch_size", type=int, default=512, help="Batch size for query encoding")
     parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True, help="L2-normalize embeddings before IP search")
-    parser.add_argument(
-        "--query_prefix",
-        default="Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ",
-        help="Text prefix added to every query before encoding",
-    )
-    parser.add_argument("--passage_prefix", default="", help="Text prefix added to every corpus passage before encoding")
     parser.add_argument("--topk", type=int, default=100, help="Retrieval depth for each query")
-    parser.add_argument("--search_batch_size", type=int, default=256, help="FAISS query search batch size")
-    parser.add_argument("--faiss_add_batch_size", type=int, default=200000, help="FAISS corpus add batch size")
+    parser.add_argument("--search_batch_size", type=int, default=1024, help="FAISS query search batch size")
+    parser.add_argument("--faiss_add_batch_size", type=int, default=500000, help="FAISS corpus add batch size")
     parser.add_argument("--faiss_gpu", action="store_true", help="Move the exact IndexFlatIP search index to GPU(s)")
-    parser.add_argument("--faiss_gpu_devices", default="all", help="Comma-separated GPU IDs for FAISS search, or 'all'")
-    parser.add_argument("--device", default="cuda:0", help="Torch device for encoding")
-    parser.add_argument("--dtype", choices=["auto", "float32", "float16", "bfloat16"], default="bfloat16", help="Model dtype")
-    parser.add_argument("--trust_remote_code", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--faiss_gpu_devices", default="1,2,3", help="Comma-separated GPU IDs for FAISS search, or 'all'")
+    parser.add_argument("--device", default="cuda:0", help="Torch device for SentenceTransformer encoding")
+    parser.add_argument("--show_progress", action=argparse.BooleanOptionalAction, default=True, help="Show SentenceTransformers progress bars")
     args = parser.parse_args()
+
     if "all" in args.languages:
         args.languages = RQ3_LANGUAGES
     if "all" in args.splits:
@@ -664,22 +610,22 @@ def parse_args() -> argparse.Namespace:
     invalid_splits = sorted(set(args.splits) - set(SPLIT_TO_DATASET))
     if invalid_splits:
         parser.error(f"invalid split(s): {invalid_splits}; use dev, dl19, dl20, or all")
+
+    args.output_dir = Path(args.output_dir)
+    args.corpus_emb_cache = Path(args.corpus_emb_cache)
     return args
 
 
 def main() -> None:
     args = parse_args()
-    output_dir = Path(args.output_dir)
-    args.corpus_emb_cache = Path(args.corpus_emb_cache)
-
-    LOG.info("Dense multilingual baseline")
+    LOG.info("EmbeddingGemma dense baseline")
     LOG.info("model=%s", args.model)
     LOG.info("languages=%s", args.languages)
     LOG.info("splits=%s", args.splits)
-    LOG.info("output_dir=%s", output_dir)
+    LOG.info("output_dir=%s", args.output_dir)
     LOG.info("corpus_emb_cache=%s", args.corpus_emb_cache)
 
-    tokenizer, model, device = load_encoder(args)
+    model, has_model_card_api = load_sentence_transformer(args.model, args.device)
 
     doc_ids, doc_texts = load_corpus(CORPUS_TSV)
     corpus_embeddings = None
@@ -687,27 +633,22 @@ def main() -> None:
         corpus_embeddings = load_cached_embeddings(args.corpus_emb_cache, expected_count=len(doc_ids))
 
     if corpus_embeddings is None:
-        t0 = time.time()
-        corpus_embeddings = encode_texts(
+        start = time.time()
+        corpus_embeddings = encode_with_model_card_api(
+            model,
             doc_texts,
-            tokenizer=tokenizer,
-            model=model,
-            device=device,
+            mode="document",
             batch_size=args.corpus_batch_size,
-            max_length=args.corpus_max_length,
-            pooling=args.pooling,
             normalize=args.normalize,
-            prefix=args.passage_prefix,
+            show_progress=args.show_progress,
+            has_model_card_api=has_model_card_api,
         )
         meta = {
             "model": args.model,
-            "pooling": args.pooling,
-            "normalize": args.normalize,
-            "query_prefix": args.query_prefix,
-            "passage_prefix": args.passage_prefix,
-            "corpus_max_length": args.corpus_max_length,
+            "normalization": args.normalize,
             "shape": list(corpus_embeddings.shape),
-            "encoded_seconds": time.time() - t0,
+            "encoded_seconds": time.time() - start,
+            "sentence_transformers_model_card_api": has_model_card_api,
         }
         save_cached_embeddings(args.corpus_emb_cache, corpus_embeddings, doc_ids, meta)
 
@@ -740,16 +681,15 @@ def main() -> None:
                 qrels=qrels,
                 doc_ids=doc_ids,
                 faiss_index=faiss_index,
-                tokenizer=tokenizer,
                 model=model,
-                device=device,
+                has_model_card_api=has_model_card_api,
                 args=args,
-                output_dir=output_dir,
+                output_dir=args.output_dir,
             )
             results.append(result)
-            write_summary(results, output_dir)
+            write_summary(results, args.output_dir)
 
-    write_summary(results, output_dir)
+    write_summary(results, args.output_dir)
     LOG.info("Done")
 
 
