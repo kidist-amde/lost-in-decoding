@@ -25,7 +25,7 @@ conda activate "${CONDA_ENV:-pag-env}"
 
 LANGUAGES="${1:-${LANGUAGES:-nl fr de zh}}"
 SPLITS="${2:-${SPLITS:-dev}}"
-MODEL="${MODEL:-intfloat/multilingual-e5-base}"
+MODEL="${MODEL:-google/embeddinggemma-300m}"
 MODEL_CACHE_STEM="${MODEL//\//_}"
 MODEL_CACHE_STEM="${MODEL_CACHE_STEM//:/_}"
 CORPUS_EMB_CACHE="${CORPUS_EMB_CACHE:-$OUTPUT_DIR/${MODEL_CACHE_STEM}_corpus_embs.npy}"

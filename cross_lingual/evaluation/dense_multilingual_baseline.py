@@ -66,7 +66,7 @@ SPLIT_QREL_PATHS = {
 }
 
 RQ3_LANGUAGES = ["nl", "fr", "de", "zh"]
-DEFAULT_MODEL = "intfloat/multilingual-e5-base"
+DEFAULT_MODEL = "google/embeddinggemma-300m"
 
 ISO_TO_LANG_NAME = {
     "ar": "arabic",
