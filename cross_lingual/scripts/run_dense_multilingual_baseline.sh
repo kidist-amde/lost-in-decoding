@@ -6,13 +6,14 @@
 #SBATCH --mem=480G
 #SBATCH --gres=gpu:4
 #SBATCH --partition=gpu_h100
-#SBATCH --time=01-12:00:00
-#SBATCH --output=experiments/RQ3_crosslingual/%x-%j.out
-#SBATCH --error=experiments/RQ3_crosslingual/%x-%j.err
+#SBATCH --time=5:00:00
+#SBATCH --output=experiments/RQ3_crosslingual/dense_multilingual_baseline/%x-%j.out
+#SBATCH --error=experiments/RQ3_crosslingual/dense_multilingual_baseline/%x-%j.err
 
 set -euo pipefail
 
-REPO_ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "${SLURM_SUBMIT_DIR:-$SCRIPT_DIR/../..}")"
 cd "$REPO_ROOT"
 
 OUTPUT_DIR="${OUTPUT_DIR:-experiments/RQ3_crosslingual/dense_multilingual_baseline}"
@@ -24,8 +25,10 @@ conda activate "${CONDA_ENV:-pag-env}"
 
 LANGUAGES="${1:-${LANGUAGES:-nl fr de zh}}"
 SPLITS="${2:-${SPLITS:-dev}}"
-MODEL="${MODEL:-google/embeddinggemma-300m}"
-CORPUS_EMB_CACHE="${CORPUS_EMB_CACHE:-$OUTPUT_DIR/embeddinggemma_corpus_embs.npy}"
+MODEL="${MODEL:-intfloat/multilingual-e5-base}"
+MODEL_CACHE_STEM="${MODEL//\//_}"
+MODEL_CACHE_STEM="${MODEL_CACHE_STEM//:/_}"
+CORPUS_EMB_CACHE="${CORPUS_EMB_CACHE:-$OUTPUT_DIR/${MODEL_CACHE_STEM}_corpus_embs.npy}"
 
 CORPUS_BATCH_SIZE="${CORPUS_BATCH_SIZE:-512}"
 QUERY_BATCH_SIZE="${QUERY_BATCH_SIZE:-512}"

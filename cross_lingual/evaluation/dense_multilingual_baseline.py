@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Exact multilingual dense baseline for RQ3 using EmbeddingGemma.
+Exact multilingual dense baseline for RQ3 using a SentenceTransformer encoder.
 
 This script:
   - encodes the MS MARCO English corpus in batches,
@@ -24,6 +24,7 @@ import csv
 import json
 import logging
 import math
+import re
 import sys
 import time
 from pathlib import Path
@@ -65,6 +66,7 @@ SPLIT_QREL_PATHS = {
 }
 
 RQ3_LANGUAGES = ["nl", "fr", "de", "zh"]
+DEFAULT_MODEL = "intfloat/multilingual-e5-base"
 
 ISO_TO_LANG_NAME = {
     "ar": "arabic",
@@ -281,7 +283,17 @@ def load_sentence_transformer(model_name: str, device: str):
     if device.startswith("cuda") and not torch.cuda.is_available():
         device = "cpu"
     LOG.info("Loading SentenceTransformer %s on %s", model_name, device)
-    model = SentenceTransformer(model_name, device=device)
+    try:
+        model = SentenceTransformer(model_name, device=device)
+    except Exception as exc:
+        error_text = str(exc).lower()
+        if "gated repo" in error_text or "access to model" in error_text:
+            raise RuntimeError(
+                f"Cannot load model '{model_name}' because it is gated on Hugging Face. "
+                f"Request access for that repo or pass an open multilingual model such as "
+                f"'{DEFAULT_MODEL}' via --model."
+            ) from exc
+        raise
     has_model_card_api = hasattr(model, "encode_query") and hasattr(model, "encode_document")
     if not has_model_card_api:
         LOG.warning(
@@ -289,6 +301,25 @@ def load_sentence_transformer(model_name: str, device: str):
             "falling back to normalized encode(). Upgrade sentence-transformers for exact model-card API."
         )
     return model, has_model_card_api
+
+
+def uses_e5_prefixes(model_name: str) -> bool:
+    return "e5" in model_name.lower()
+
+
+def prepare_texts_for_encoding(
+    texts: Sequence[str],
+    mode: str,
+    model_name: str,
+    has_model_card_api: bool,
+) -> List[str]:
+    prepared = list(texts)
+    if has_model_card_api:
+        return prepared
+    if uses_e5_prefixes(model_name):
+        prefix = "query: " if mode == "query" else "passage: "
+        return [text if text.startswith(prefix) else f"{prefix}{text}" for text in prepared]
+    return prepared
 
 
 def encode_with_model_card_api(
@@ -299,6 +330,7 @@ def encode_with_model_card_api(
     normalize: bool,
     show_progress: bool,
     has_model_card_api: bool,
+    model_name: str,
 ) -> np.ndarray:
     if not texts:
         return np.empty((0, 0), dtype=np.float32)
@@ -323,8 +355,9 @@ def encode_with_model_card_api(
         else:
             raise ValueError(f"Unknown encoding mode: {mode}")
     else:
+        prepared_texts = prepare_texts_for_encoding(texts, mode, model_name, has_model_card_api)
         embeddings = model.encode(
-            list(texts),
+            prepared_texts,
             batch_size=batch_size,
             convert_to_numpy=True,
             normalize_embeddings=normalize,
@@ -338,9 +371,42 @@ def cache_sidecar(path: Path, suffix: str) -> Path:
     return Path(str(path) + suffix)
 
 
-def load_cached_embeddings(cache_path: Path, expected_count: int) -> Optional[np.ndarray]:
+def model_cache_stem(model_name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", model_name).strip("._-") or "model"
+
+
+def default_corpus_emb_cache(output_dir: Path, model_name: str) -> Path:
+    return output_dir / f"{model_cache_stem(model_name)}_corpus_embs.npy"
+
+
+def load_cached_embeddings(
+    cache_path: Path,
+    expected_count: int,
+    expected_model: str,
+    expected_normalize: bool,
+) -> Optional[np.ndarray]:
     if not cache_path.exists():
         return None
+
+    meta_path = cache_sidecar(cache_path, ".meta.json")
+    if meta_path.exists():
+        with open(meta_path) as f:
+            meta = json.load(f)
+        cached_model = meta.get("model")
+        cached_normalize = meta.get("normalization")
+        if cached_model and cached_model != expected_model:
+            raise ValueError(
+                f"Corpus cache {cache_path} was created for model '{cached_model}', "
+                f"not '{expected_model}'. Use a different --corpus_emb_cache path or "
+                "--force_corpus_reencode."
+            )
+        if cached_normalize is not None and bool(cached_normalize) != bool(expected_normalize):
+            raise ValueError(
+                f"Corpus cache {cache_path} was created with normalize={cached_normalize}, "
+                f"not normalize={expected_normalize}. Use a different --corpus_emb_cache path "
+                f"or --force_corpus_reencode."
+            )
+
     LOG.info("Loading cached corpus embeddings from %s", cache_path)
     with open(cache_path, "rb") as f:
         embeddings = np.load(f)
@@ -492,6 +558,7 @@ def evaluate_one(
         normalize=args.normalize,
         show_progress=args.show_progress,
         has_model_card_api=has_model_card_api,
+        model_name=args.model,
     )
 
     topk = min(args.topk, len(doc_ids))
@@ -575,7 +642,7 @@ def write_summary(results: List[Dict], output_dir: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Exact FAISS dense multilingual baseline for RQ3")
-    parser.add_argument("--model", default="google/embeddinggemma-300m", help="SentenceTransformer model ID or local path")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="SentenceTransformer model ID or local path")
     parser.add_argument("--languages", nargs="+", default=RQ3_LANGUAGES, help="Languages to evaluate, or 'all'")
     parser.add_argument("--splits", nargs="+", default=["dev"], help="Splits to evaluate: dev, dl19, dl20, or 'all'")
     parser.add_argument(
@@ -585,8 +652,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--corpus_emb_cache",
-        default=str(REPO_ROOT / "experiments" / "RQ3_crosslingual" / "dense_multilingual_baseline" / "embeddinggemma_corpus_embs.npy"),
-        help="Path to cached corpus embeddings. Existing caches are loaded automatically.",
+        default=None,
+        help="Path to cached corpus embeddings. Defaults to an output-dir cache keyed by --model.",
     )
     parser.add_argument("--force_corpus_reencode", action="store_true", help="Ignore an existing corpus embedding cache")
     parser.add_argument("--no_download", action="store_true", help="Do not download missing mMARCO query files")
@@ -612,13 +679,16 @@ def parse_args() -> argparse.Namespace:
         parser.error(f"invalid split(s): {invalid_splits}; use dev, dl19, dl20, or all")
 
     args.output_dir = Path(args.output_dir)
-    args.corpus_emb_cache = Path(args.corpus_emb_cache)
+    if args.corpus_emb_cache:
+        args.corpus_emb_cache = Path(args.corpus_emb_cache)
+    else:
+        args.corpus_emb_cache = default_corpus_emb_cache(args.output_dir, args.model)
     return args
 
 
 def main() -> None:
     args = parse_args()
-    LOG.info("EmbeddingGemma dense baseline")
+    LOG.info("Dense multilingual baseline")
     LOG.info("model=%s", args.model)
     LOG.info("languages=%s", args.languages)
     LOG.info("splits=%s", args.splits)
@@ -630,7 +700,12 @@ def main() -> None:
     doc_ids, doc_texts = load_corpus(CORPUS_TSV)
     corpus_embeddings = None
     if not args.force_corpus_reencode:
-        corpus_embeddings = load_cached_embeddings(args.corpus_emb_cache, expected_count=len(doc_ids))
+        corpus_embeddings = load_cached_embeddings(
+            args.corpus_emb_cache,
+            expected_count=len(doc_ids),
+            expected_model=args.model,
+            expected_normalize=args.normalize,
+        )
 
     if corpus_embeddings is None:
         start = time.time()
@@ -642,6 +717,7 @@ def main() -> None:
             normalize=args.normalize,
             show_progress=args.show_progress,
             has_model_card_api=has_model_card_api,
+            model_name=args.model,
         )
         meta = {
             "model": args.model,
