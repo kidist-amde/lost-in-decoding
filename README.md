@@ -1,7 +1,7 @@
 [![SIGIR 2026](https://img.shields.io/badge/SIGIR-2026-blue)](https://sigir2026.org/en-AU/pages/submissions/reproducibility-track)
 [![Submission](https://img.shields.io/badge/submission-298-informational)](#)
 [![License](https://img.shields.io/badge/license-Apache%202.0-lightgrey)](LICENSE)
-[![Paper](https://img.shields.io/badge/paper-arXiv-red)](https://arxiv.org/abs/XXXX.XXXXX)
+[![Paper](https://img.shields.io/badge/paper-arXiv-red)](https://arxiv.org/abs/2604.23396)
 
 # Lost in Decoding? Reproducing and Stress-Testing the Look-Ahead Prior in Generative Retrieval
 
