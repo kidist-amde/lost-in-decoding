@@ -174,10 +174,61 @@ ls experiments/RQ3_crosslingual/summary*.csv
 
 ## Reproducibility Notes
 
-- Use fixed seeds where scripts provide them (`1999`, `5`, `27`, `2016`, `2026`).
-- Keep `lex_topk` / `smt_topk` consistent when comparing runs.
-- Prefer writing outputs to fresh subdirectories when testing modifications.
-- Record environment versions (`conda env export > env_snapshot.yml`) for archival.
+> [!TIP]
+> - Use fixed seeds where scripts provide them (`1999`, `5`, `27`, `2016`, `2026`).
+> - Keep `lex_topk` / `smt_topk` consistent when comparing runs.
+> - Prefer writing outputs to fresh subdirectories when testing modifications.
+> - Record environment versions (`conda env export > env_snapshot.yml`) for archival.
+
+### Known run-to-run decoding variance and RQ2 metric note
+
+For PAG with `m=64`, `k=100` on MS MARCO Dev, the dedicated Table 3
+reproduction run reports MRR@10 = 0.386. The independently launched clean
+run used in the RQ2 robustness pipeline produces a different Stage-2
+retrieval run, despite using the same checkpoint, 6,980 Dev queries,
+lexical BOW artifacts, and key decoding settings (`m=64`, `smt_topk=100`,
+`lex_topk=1000`, `max_new_token_for_docid=8`, and
+`lex_constrained=lexical_tmp_rescore`).
+
+Our audit traced the run-level divergence to independently launched,
+unseeded GPU inference. Planner (Stage 1) scores already differ at
+approximately 1e-6 scale across runs. These small numerical differences
+are negligible for most Stage-1 rankings, but constrained autoregressive
+beam search in Stage 2 contains discrete pruning decisions: a small score
+perturbation can change which prefix survives a close beam competition,
+after which the two decoding trajectories can diverge into entirely
+different candidate documents for a query.
+
+For the RQ2 clean run, recomputing MRR@10 from the saved run file with
+proper top-10 truncation gives true MRR@10 = 0.350. The value 0.362
+reported in the RQ2 table was produced by the robustness evaluation path
+(`robustness/metrics/plan_collapse.py::compute_retrieval_metrics`), which
+computes `pytrec_eval`'s `recip_rank` over the full (untruncated,
+`smt_topk=100`) run rather than truncating to the top 10 first, and
+stores the result under the `MRR@10` label. Thus, the headline 0.386 and
+published RQ2 clean 0.362 should not be interpreted as two measurements
+of the same deterministic run:
+
+- Table 3 Dev run, true MRR@10: 0.386
+- RQ2 clean run, true MRR@10 (top-10 truncated): 0.350
+- RQ2 clean run, untruncated reciprocal rank as reported under `MRR@10`: 0.362
+
+The clean RQ2 run is fixed and reused across query-variation seeds/attacks
+(the clean numbers do not vary per seed); seed variability applies to the
+generated perturbation sets, not to the clean reference itself.
+
+We have not yet measured the run-to-run variance distribution across
+repeated clean-run launches (e.g., mean/std over 5-10 runs); the 0.386 vs
+0.350 comparison here is a single paired observation. What is established
+is that independently launched, nondeterministic decoding runs can
+diverge substantially, not a precise variance estimate.
+
+For stricter same-environment reproducibility, use fixed random seeds and
+deterministic execution settings (e.g., `torch.use_deterministic_algorithms(True)`)
+in the Stage-2 decoding path (`t5_pretrainer/evaluate.py`). Note that
+deterministic execution can reduce performance and, per PyTorch's own
+reproducibility documentation, does not guarantee bit-exact agreement
+across different PyTorch/CUDA versions, hardware, or platforms.
 
 ## Troubleshooting
 

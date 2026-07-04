@@ -6,7 +6,7 @@
 #SBATCH --mem=480G
 #SBATCH --gres=gpu:4
 #SBATCH --partition=gpu_h100
-#SBATCH --time=5:00:00
+#SBATCH --time=1-12:00:00
 #SBATCH --output=experiments/RQ3_crosslingual/dense_multilingual_baseline/%x-%j.out
 #SBATCH --error=experiments/RQ3_crosslingual/dense_multilingual_baseline/%x-%j.err
 
@@ -22,6 +22,8 @@ mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
 
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate "${CONDA_ENV:-pag-env}"
+export HF_TOKEN="---"
+
 
 LANGUAGES="${1:-${LANGUAGES:-nl fr de zh}}"
 SPLITS="${2:-${SPLITS:-dev}}"

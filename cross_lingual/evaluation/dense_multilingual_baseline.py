@@ -286,8 +286,18 @@ def load_sentence_transformer(model_name: str, device: str):
     try:
         model = SentenceTransformer(model_name, device=device)
     except Exception as exc:
-        error_text = str(exc).lower()
-        if "gated repo" in error_text or "access to model" in error_text:
+        error_texts = []
+        current = exc
+        while current is not None:
+            error_texts.append(str(current).lower())
+            current = current.__cause__ or current.__context__
+        combined_error_text = "\n".join(error_texts)
+        if (
+            "gated repo" in combined_error_text
+            or "public gated repositor" in combined_error_text
+            or "403 forbidden" in combined_error_text
+            or "cannot access content at: https://huggingface.co/" in combined_error_text
+        ):
             raise RuntimeError(
                 f"Cannot load model '{model_name}' because it is gated on Hugging Face. "
                 f"Request access for that repo or pass an open multilingual model such as "
