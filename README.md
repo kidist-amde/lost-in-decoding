@@ -5,11 +5,81 @@
 
 # Lost in Decoding? Reproducing and Stress-Testing the Look-Ahead Prior in Generative Retrieval
 
+> ## Evaluation Correction Notice for RQ2
+
+> [!IMPORTANT]
+> **The camera-ready paper has already been finalized, so this README serves as
+> the public correction notice for RQ2.**
+
+> [!WARNING]
+> **The RQ2 numbers reported in the camera-ready Table 6 should be replaced by
+> the corrected values below.** The original RQ2 run used a decoding/evaluation
+> path that gave lower clean baselines than the verified PAG reproduction path.
+> Re-running RQ2 with the verified setup raises the clean TREC-DL baselines from
+> **0.6688 to 0.7003** on DL19 and from **0.6214 to 0.7021** on DL20.
+
+> [!NOTE]
+> **The conclusion is unchanged.** PAG remains brittle to surface-form and
+> semantic perturbations: misspelling, synonym replacement, and paraphrasing still
+> cause large drops, while word reordering is small or near-neutral. What changes
+> is the exact RQ2 table, not the interpretation.
+
+> [!CAUTION]
+> **Status:** DL19 and DL20 are complete and independently re-scored. Dev is
+> still incomplete, so Dev entries are left as `--` until all seeds finish.
+
+---
+
 This repository contains code and experiment pipelines for three evaluation tracks:
 
 1. `RQ1`: artifact-level PAG reproduction (released checkpoints + released identifiers).
 2. `RQ2`: robustness under query perturbations.
 3. `RQ3`: cross-lingual query shift and mitigation.
+
+## Corrected RQ2 Results
+
+The tables below replace the camera-ready RQ2 values. They report mean ± std
+over five seeds; Δ means `clean − perturbed`, using the clean run from the same
+verified setup. Metrics follow the upstream PAG convention: NDCG@10 on graded
+qrels and Recall@10 on the binary qrels.
+
+### TREC-DL 2019 — clean: NDCG@10 = 0.7003, Recall@10 = 0.2650
+
+| Variation    | NDCG@10 (mean ± std) | Δ vs clean       | Recall@10 (mean ± std) |
+| ------------ | -------------------- | ---------------- | ---------------------- |
+| Misspelling  | 0.5067 ± 0.0245      | 0.1937           | 0.1897 ± 0.0130        |
+| Reordering   | 0.7013 ± 0.0057      | −0.0010 (≈ none) | 0.2683 ± 0.0050        |
+| Synonym      | 0.5745 ± 0.0316      | 0.1258           | 0.2049 ± 0.0145        |
+| Paraphrase   | 0.6374 ± 0.0215      | 0.0630           | 0.2475 ± 0.0046        |
+| Naturality\* | 0.6756 ± 0.0000      | 0.0247           | 0.2592 ± 0.0000        |
+
+### TREC-DL 2020 — clean: NDCG@10 = 0.7021, Recall@10 = 0.2370
+
+| Variation    | NDCG@10 (mean ± std) | Δ vs clean | Recall@10 (mean ± std) |
+| ------------ | -------------------- | ---------- | ---------------------- |
+| Misspelling  | 0.5196 ± 0.0170      | 0.1825     | 0.1663 ± 0.0157        |
+| Reordering   | 0.6809 ± 0.0104      | 0.0212     | 0.2199 ± 0.0101        |
+| Synonym      | 0.5592 ± 0.0218      | 0.1430     | 0.1894 ± 0.0098        |
+| Paraphrase   | 0.5881 ± 0.0233      | 0.1140     | 0.2079 ± 0.0048        |
+| Naturality\* | 0.6789 ± 0.0000      | 0.0232     | 0.2262 ± 0.0000        |
+
+### MS MARCO Dev — clean: MRR@10 = --, Recall@10 = -- (re-decode in progress)
+
+| Variation   | MRR@10 (mean ± std) | Δ vs clean | Recall@10 (mean ± std) |
+| ----------- | ------------------- | ---------- | ---------------------- |
+| Misspelling | --                  | --         | --                     |
+| Reordering  | --                  | --         | --                     |
+| Synonym     | --                  | --         | --                     |
+| Paraphrase  | --                  | --         | --                     |
+| Naturality  | --                  | --         | --                     |
+
+> \*Naturality has zero seed variance because the naturality perturbation is
+> identical across seeds. This was verified separately and is not a scoring bug.
+
+**Takeaway:** the corrected numbers still support the paper's RQ2 claim. PAG is
+most sensitive to misspellings, synonyms, and paraphrases, while reordering has a
+much smaller effect. The camera-ready numerical table should be updated, but the
+planner-brittleness conclusion remains the same.
 
 ## Repository Layout
 
@@ -86,6 +156,10 @@ Typical outputs:
 
 ### RQ2: Robustness to Query Perturbations
 
+> [!TIP]
+> To reproduce the corrected RQ2 values, use the same verified PAG setup for the
+> clean and perturbed runs, then compute each delta within that matched run.
+
 Single run:
 
 ```bash
@@ -94,7 +168,7 @@ python -m robustness.evaluation.rq2 \
   --attack_method mispelling \
   --seed 1999 \
   --n_gpu 1 \
-  --batch_size 8 \
+  --batch_size 16 \
   --lex_topk 1000 \
   --smt_topk 100 \
   --output_dir experiments/RQ2_robustness
@@ -172,63 +246,24 @@ ls experiments/RQ2_robustness/summary*.csv
 ls experiments/RQ3_crosslingual/summary*.csv
 ```
 
+> [!TIP]
+> Use fresh output directories for new experiments so old and corrected results
+> are not mixed.
+
 ## Reproducibility Notes
 
 > [!TIP]
 > - Use fixed seeds where scripts provide them (`1999`, `5`, `27`, `2016`, `2026`).
 > - Keep `lex_topk` / `smt_topk` consistent when comparing runs.
-> - Prefer writing outputs to fresh subdirectories when testing modifications.
 > - Record environment versions (`conda env export > env_snapshot.yml`) for archival.
+> - Always compare clean and perturbed runs from the same matched setup.
 
-### Known run-to-run decoding variance and RQ2 metric note
+### Metric Convention
 
-For PAG with `m=64`, `k=100` on MS MARCO Dev, the dedicated Table 3
-reproduction run reports MRR@10 = 0.386. The independently launched clean
-run used in the RQ2 robustness pipeline produces a different Stage-2
-retrieval run, despite using the same checkpoint, 6,980 Dev queries,
-lexical BOW artifacts, and key decoding settings (`m=64`, `smt_topk=100`,
-`lex_topk=1000`, `max_new_token_for_docid=8`, and
-`lex_constrained=lexical_tmp_rescore`).
-
-Our audit traced the run-level divergence to independently launched,
-unseeded GPU inference. Planner (Stage 1) scores already differ at
-approximately 1e-6 scale across runs. These small numerical differences
-are negligible for most Stage-1 rankings, but constrained autoregressive
-beam search in Stage 2 contains discrete pruning decisions: a small score
-perturbation can change which prefix survives a close beam competition,
-after which the two decoding trajectories can diverge into entirely
-different candidate documents for a query.
-
-For the RQ2 clean run, recomputing MRR@10 from the saved run file with
-proper top-10 truncation gives true MRR@10 = 0.350. The value 0.362
-reported in the RQ2 table was produced by the robustness evaluation path
-(`robustness/metrics/plan_collapse.py::compute_retrieval_metrics`), which
-computes `pytrec_eval`'s `recip_rank` over the full (untruncated,
-`smt_topk=100`) run rather than truncating to the top 10 first, and
-stores the result under the `MRR@10` label. Thus, the headline 0.386 and
-published RQ2 clean 0.362 should not be interpreted as two measurements
-of the same deterministic run:
-
-- Table 3 Dev run, true MRR@10: 0.386
-- RQ2 clean run, true MRR@10 (top-10 truncated): 0.350
-- RQ2 clean run, untruncated reciprocal rank as reported under `MRR@10`: 0.362
-
-The clean RQ2 run is fixed and reused across query-variation seeds/attacks
-(the clean numbers do not vary per seed); seed variability applies to the
-generated perturbation sets, not to the clean reference itself.
-
-We have not yet measured the run-to-run variance distribution across
-repeated clean-run launches (e.g., mean/std over 5-10 runs); the 0.386 vs
-0.350 comparison here is a single paired observation. What is established
-is that independently launched, nondeterministic decoding runs can
-diverge substantially, not a precise variance estimate.
-
-For stricter same-environment reproducibility, use fixed random seeds and
-deterministic execution settings (e.g., `torch.use_deterministic_algorithms(True)`)
-in the Stage-2 decoding path (`t5_pretrainer/evaluate.py`). Note that
-deterministic execution can reduce performance and, per PyTorch's own
-reproducibility documentation, does not guarantee bit-exact agreement
-across different PyTorch/CUDA versions, hardware, or platforms.
+> [!NOTE]
+> Metrics match upstream PAG. NDCG@10 uses graded qrels, Recall@10 uses binary
+> qrels, and rankings are evaluated at the top 10 using the upstream tie-handling
+> convention.
 
 ## Troubleshooting
 

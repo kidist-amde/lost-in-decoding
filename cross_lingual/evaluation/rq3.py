@@ -122,6 +122,10 @@ def evaluate_single(
     """
     dataset_name = SPLIT_TO_DATASET[split]
     qrel_path = str(SPLIT_QREL_PATHS[split])
+    # TREC DL19/DL20 conventionally score MRR against binary-relevance
+    # qrels (grade >= 2), not the graded qrels used for NDCG; MS MARCO Dev
+    # only has one (binary) qrel file, so it is reused for both.
+    mrr_qrel_path = str(SPLIT_QREL_PATHS.get(f"{split}_binary", SPLIT_QREL_PATHS[split]))
 
     print(f"\n{'='*70}")
     print(f"[RQ3] Language={language}, Split={split}")
@@ -163,6 +167,8 @@ def evaluate_single(
     # Load qrels
     with open(qrel_path) as f:
         qrels = json.load(f)
+    with open(mrr_qrel_path) as f:
+        mrr_qrels = json.load(f)
 
     if not eval_only:
         # ── 2. Run English baseline ───────────────────────────────────────
@@ -329,43 +335,43 @@ def evaluate_single(
         # --- English baseline metrics ---
         if english_lex_run:
             result["english_lex_metrics"] = compute_retrieval_metrics(
-                english_lex_run, qrels, k=10
+                english_lex_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
         if english_smt_run:
             result["english_smt_metrics"] = compute_retrieval_metrics(
-                english_smt_run, qrels, k=10
+                english_smt_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
 
         # --- System A: Naive PAG metrics ---
         if naive_lex_run:
             result["naive_lex_metrics"] = compute_retrieval_metrics(
-                naive_lex_run, qrels, k=10
+                naive_lex_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
         if naive_smt_run:
             result["naive_smt_metrics"] = compute_retrieval_metrics(
-                naive_smt_run, qrels, k=10
+                naive_smt_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
 
         # --- System B: Sequential-only metrics ---
         if seq_only_run:
             result["seq_only_metrics"] = compute_retrieval_metrics(
-                seq_only_run, qrels, k=10
+                seq_only_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
 
         # --- System C: Translate-at-inference metrics ---
         if translate_lex_run:
             result["translate_lex_metrics"] = compute_retrieval_metrics(
-                translate_lex_run, qrels, k=10
+                translate_lex_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
         if translate_smt_run:
             result["translate_smt_metrics"] = compute_retrieval_metrics(
-                translate_smt_run, qrels, k=10
+                translate_smt_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
 
         # --- Plan swap metrics ---
         if swap_smt_run:
             result["swap_smt_metrics"] = compute_retrieval_metrics(
-                swap_smt_run, qrels, k=10
+                swap_smt_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
 
         # --- Planner diagnostics ---

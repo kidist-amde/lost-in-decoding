@@ -276,15 +276,39 @@ def aggregate_plan_collapse(
 # Evaluate and compare  (retrieval metrics: NDCG@10, MRR@10)
 # ---------------------------------------------------------------------------
 
+def _truncate_run(run: Dict[str, Dict[str, float]], k: int) -> Dict[str, Dict[str, float]]:
+    """Keep only the top-k scored documents per query."""
+    truncated = {}
+    for qid, docs in run.items():
+        ranked = sorted(docs.items(), key=lambda item: item[1], reverse=True)[:k]
+        truncated[qid] = dict(ranked)
+    return truncated
+
+
 def compute_retrieval_metrics(
     run: Dict[str, Dict[str, float]],
     qrels: Dict[str, Dict[str, int]],
     k: int = 10,
+    mrr_qrels: Optional[Dict[str, Dict[str, int]]] = None,
 ) -> Dict[str, float]:
     """
     Compute NDCG@k and MRR@k using pytrec_eval.
+
+    ``qrels`` is used for NDCG@k (graded relevance). ``mrr_qrels`` (if given)
+    is used for MRR@k instead; pass the TREC binary/hole-filled qrels here
+    for DL19/DL20 splits, where MRR and NDCG are conventionally computed
+    against different relevance thresholds. Defaults to ``qrels`` when not
+    given (e.g. for MS MARCO Dev, which only has one qrel file).
+
+    MRR@k is computed by truncating the run to the top ``k`` documents
+    per query before scoring: pytrec_eval's ``recip_rank`` ignores any
+    depth cutoff and scores the full run, so without truncating first a
+    relevant document beyond rank ``k`` would still contribute credit.
     """
     import pytrec_eval
+
+    if mrr_qrels is None:
+        mrr_qrels = qrels
 
     # Filter run to only queries present in qrels
     filtered_run = {qid: docs for qid, docs in run.items() if qid in qrels}
@@ -298,16 +322,25 @@ def compute_retrieval_metrics(
     for qid, docs in qrels.items():
         str_qrels[str(qid)] = {str(did): int(s) for did, s in docs.items()}
 
-    evaluator = pytrec_eval.RelevanceEvaluator(str_qrels, {f"ndcg_cut_{k}", "recip_rank"})
-    results = evaluator.evaluate(str_run)
+    str_mrr_qrels = {}
+    for qid, docs in mrr_qrels.items():
+        str_mrr_qrels[str(qid)] = {str(did): int(s) for did, s in docs.items()}
 
-    ndcg_values = [v[f"ndcg_cut_{k}"] for v in results.values()]
-    mrr_values = [v["recip_rank"] for v in results.values()]
+    ndcg_evaluator = pytrec_eval.RelevanceEvaluator(str_qrels, {f"ndcg_cut_{k}"})
+    ndcg_results = ndcg_evaluator.evaluate(str_run)
+
+    truncated_run = _truncate_run(str_run, k)
+    mrr_filtered_run = {qid: docs for qid, docs in truncated_run.items() if qid in str_mrr_qrels}
+    mrr_evaluator = pytrec_eval.RelevanceEvaluator(str_mrr_qrels, {"recip_rank"})
+    mrr_results = mrr_evaluator.evaluate(mrr_filtered_run)
+
+    ndcg_values = [v[f"ndcg_cut_{k}"] for v in ndcg_results.values()]
+    mrr_values = [v["recip_rank"] for v in mrr_results.values()]
 
     return {
         f"NDCG@{k}": _safe_mean(ndcg_values),
         f"MRR@{k}": _safe_mean(mrr_values),
-        "n_evaluated": len(results),
+        "n_evaluated": len(ndcg_results),
     }
 
 
@@ -315,13 +348,20 @@ def compute_retrieval_metrics_per_query(
     run: Dict[str, Dict[str, float]],
     qrels: Dict[str, Dict[str, int]],
     k: int = 10,
+    mrr_qrels: Optional[Dict[str, Dict[str, int]]] = None,
 ) -> Dict[str, Dict[str, float]]:
     """
     Per-query NDCG@k and MRR@k using pytrec_eval.
 
+    See ``compute_retrieval_metrics`` for the ``mrr_qrels`` and truncation
+    semantics.
+
     Returns {qid: {"NDCG@k": float, "MRR@k": float}}.
     """
     import pytrec_eval
+
+    if mrr_qrels is None:
+        mrr_qrels = qrels
 
     filtered_run = {qid: docs for qid, docs in run.items() if qid in qrels}
 
@@ -333,14 +373,24 @@ def compute_retrieval_metrics_per_query(
     for qid, docs in qrels.items():
         str_qrels[str(qid)] = {str(did): int(s) for did, s in docs.items()}
 
-    evaluator = pytrec_eval.RelevanceEvaluator(str_qrels, {f"ndcg_cut_{k}", "recip_rank"})
-    results = evaluator.evaluate(str_run)
+    str_mrr_qrels = {}
+    for qid, docs in mrr_qrels.items():
+        str_mrr_qrels[str(qid)] = {str(did): int(s) for did, s in docs.items()}
+
+    ndcg_evaluator = pytrec_eval.RelevanceEvaluator(str_qrels, {f"ndcg_cut_{k}"})
+    ndcg_results = ndcg_evaluator.evaluate(str_run)
+
+    truncated_run = _truncate_run(str_run, k)
+    mrr_filtered_run = {qid: docs for qid, docs in truncated_run.items() if qid in str_mrr_qrels}
+    mrr_evaluator = pytrec_eval.RelevanceEvaluator(str_mrr_qrels, {"recip_rank"})
+    mrr_results = mrr_evaluator.evaluate(mrr_filtered_run)
 
     per_query = {}
-    for qid, vals in results.items():
+    all_qids = set(ndcg_results) | set(mrr_results)
+    for qid in all_qids:
         per_query[qid] = {
-            f"NDCG@{k}": vals[f"ndcg_cut_{k}"],
-            f"MRR@{k}": vals["recip_rank"],
+            f"NDCG@{k}": ndcg_results.get(qid, {}).get(f"ndcg_cut_{k}", 0.0),
+            f"MRR@{k}": mrr_results.get(qid, {}).get("recip_rank", 0.0),
         }
     return per_query
 

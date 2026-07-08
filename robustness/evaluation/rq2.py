@@ -87,6 +87,16 @@ SPLIT_PRIMARY_QREL = {
     "dev": SPLIT_QREL_PATHS["dev"],
 }
 
+# Qrel used for MRR (and other binary-relevance metrics) per split.
+# TREC DL19/DL20 conventionally score MRR against the binary-relevance
+# qrels (grade >= 2), not the graded qrels used for NDCG; MS MARCO Dev has
+# only one (binary) qrel file, so it is reused for both.
+SPLIT_MRR_QREL = {
+    "dl19": SPLIT_QREL_PATHS["dl19_binary"],
+    "dl20": SPLIT_QREL_PATHS["dl20_binary"],
+    "dev": SPLIT_QREL_PATHS["dev"],
+}
+
 # ---------------------------------------------------------------------------
 # Core RQ2 evaluation function
 # ---------------------------------------------------------------------------
@@ -252,6 +262,9 @@ def evaluate_single(
     try:
         with open(qrel_path) as f:
             qrels = json.load(f)
+        mrr_qrel_path = SPLIT_MRR_QREL[split]
+        with open(mrr_qrel_path) as f:
+            mrr_qrels = json.load(f)
 
         # Load lexical planner runs
         clean_lex_run = load_lexical_run(clean_lex_dir, dataset_name)
@@ -269,19 +282,19 @@ def evaluate_single(
 
         if clean_lex_run:
             result["clean_lex_metrics"] = compute_retrieval_metrics(
-                clean_lex_run, qrels, k=10
+                clean_lex_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
         if pert_lex_run:
             result["perturbed_lex_metrics"] = compute_retrieval_metrics(
-                pert_lex_run, qrels, k=10
+                pert_lex_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
         if clean_smt_run:
             result["clean_smt_metrics"] = compute_retrieval_metrics(
-                clean_smt_run, qrels, k=10
+                clean_smt_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
         if pert_smt_run:
             result["perturbed_smt_metrics"] = compute_retrieval_metrics(
-                pert_smt_run, qrels, k=10
+                pert_smt_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
 
         # --- Plan-collapse metrics (Table 2) ---
@@ -307,20 +320,20 @@ def evaluate_single(
                         per_query[qid]["tok_overlap_at_ell"] = pi_per_query[qid]["overlap_at_ell"]
 
             # Per-query SimulOnly metrics for ΔM and plan collapse classification
-            clean_lex_pq = compute_retrieval_metrics_per_query(clean_lex_run, qrels, k=10)
-            pert_lex_pq = compute_retrieval_metrics_per_query(pert_lex_run, qrels, k=10)
+            clean_lex_pq = compute_retrieval_metrics_per_query(clean_lex_run, qrels, k=10, mrr_qrels=mrr_qrels)
+            pert_lex_pq = compute_retrieval_metrics_per_query(pert_lex_run, qrels, k=10, mrr_qrels=mrr_qrels)
 
             # Enrich per_query with ΔM_SimulOnly, SeqGain, PlanSwapDrop
             clean_smt_pq = None
             if clean_smt_run:
-                clean_smt_pq = compute_retrieval_metrics_per_query(clean_smt_run, qrels, k=10)
+                clean_smt_pq = compute_retrieval_metrics_per_query(clean_smt_run, qrels, k=10, mrr_qrels=mrr_qrels)
             pert_smt_pq = None
             if pert_smt_run:
-                pert_smt_pq = compute_retrieval_metrics_per_query(pert_smt_run, qrels, k=10)
+                pert_smt_pq = compute_retrieval_metrics_per_query(pert_smt_run, qrels, k=10, mrr_qrels=mrr_qrels)
             swap_smt_pq = None
             swap_smt_run_tmp = load_sequential_run(swap_smt_dir, dataset_name)
             if swap_smt_run_tmp:
-                swap_smt_pq = compute_retrieval_metrics_per_query(swap_smt_run_tmp, qrels, k=10)
+                swap_smt_pq = compute_retrieval_metrics_per_query(swap_smt_run_tmp, qrels, k=10, mrr_qrels=mrr_qrels)
 
             # Save per-query retrieval metrics for all conditions
             pq_metrics_dir = os.path.join(pert_output, "per_query_metrics")
@@ -439,7 +452,7 @@ def evaluate_single(
         swap_smt_run = load_sequential_run(swap_smt_dir, dataset_name)
         if swap_smt_run:
             result["planswap_smt_metrics"] = compute_retrieval_metrics(
-                swap_smt_run, qrels, k=10
+                swap_smt_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
 
         if "perturbed_smt_metrics" in result and "planswap_smt_metrics" in result:

@@ -74,6 +74,16 @@ SPLIT_PRIMARY_QREL = {
     "dev": SPLIT_QREL_PATHS["dev"],
 }
 
+# Qrel used for MRR (and other binary-relevance metrics) per split.
+# TREC DL19/DL20 conventionally score MRR against the binary-relevance
+# qrels (grade >= 2), not the graded qrels used for NDCG; MS MARCO Dev has
+# only one (binary) qrel file, so it is reused for both.
+SPLIT_MRR_QREL = {
+    "dl19": SPLIT_QREL_PATHS["dl19_binary"],
+    "dl20": SPLIT_QREL_PATHS["dl20_binary"],
+    "dev": SPLIT_QREL_PATHS["dev"],
+}
+
 # ---------------------------------------------------------------------------
 # Core RQ2 evaluation function
 # ---------------------------------------------------------------------------
@@ -170,6 +180,9 @@ def evaluate_single(
     try:
         with open(qrel_path) as f:
             qrels = json.load(f)
+        mrr_qrel_path = SPLIT_MRR_QREL[split]
+        with open(mrr_qrel_path) as f:
+            mrr_qrels = json.load(f)
 
         # Load runs
         clean_run = load_ripor_run(clean_run_dir, dataset_name)
@@ -177,11 +190,11 @@ def evaluate_single(
 
         if clean_run:
             result["clean_metrics"] = compute_retrieval_metrics(
-                clean_run, qrels, k=10
+                clean_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
         if pert_run:
             result["perturbed_metrics"] = compute_retrieval_metrics(
-                pert_run, qrels, k=10
+                pert_run, qrels, k=10, mrr_qrels=mrr_qrels
             )
 
     except Exception as e:

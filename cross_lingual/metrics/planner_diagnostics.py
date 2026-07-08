@@ -483,6 +483,7 @@ def aggregate_planner_diagnostics(
     target_tokens: Optional[Dict[str, List[int]]] = None,
     swap_smt_run: Optional[Dict[str, Dict[str, float]]] = None,
     k: int = 10,
+    mrr_qrels: Optional[Dict[str, Dict[str, int]]] = None,
 ) -> Dict:
     """
     Compute all planner diagnostic metrics for cross-lingual analysis.
@@ -515,10 +516,10 @@ def aggregate_planner_diagnostics(
     # 4. PAG gain
     from robustness.metrics.plan_collapse import compute_retrieval_metrics
 
-    english_lex_metrics = compute_retrieval_metrics(english_lex_run, qrels, k)
-    english_smt_metrics = compute_retrieval_metrics(english_smt_run, qrels, k)
-    target_lex_metrics = compute_retrieval_metrics(target_lex_run, qrels, k)
-    target_smt_metrics = compute_retrieval_metrics(target_smt_run, qrels, k)
+    english_lex_metrics = compute_retrieval_metrics(english_lex_run, qrels, k, mrr_qrels=mrr_qrels)
+    english_smt_metrics = compute_retrieval_metrics(english_smt_run, qrels, k, mrr_qrels=mrr_qrels)
+    target_lex_metrics = compute_retrieval_metrics(target_lex_run, qrels, k, mrr_qrels=mrr_qrels)
+    target_smt_metrics = compute_retrieval_metrics(target_smt_run, qrels, k, mrr_qrels=mrr_qrels)
 
     results["pag_gain"] = compare_pag_gain(
         english_lex_metrics, english_smt_metrics,
@@ -527,7 +528,7 @@ def aggregate_planner_diagnostics(
 
     # 5. Plan swap impact
     if swap_smt_run:
-        swap_metrics = compute_retrieval_metrics(swap_smt_run, qrels, k)
+        swap_metrics = compute_retrieval_metrics(swap_smt_run, qrels, k, mrr_qrels=mrr_qrels)
         results["plan_swap_impact"] = plan_swap_impact(
             target_smt_metrics, swap_metrics
         )

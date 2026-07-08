@@ -1,0 +1,153 @@
+#!/bin/bash
+#SBATCH --job-name=table3_trec_repro
+#SBATCH --partition=gpu_h100
+#SBATCH --gres=gpu:1
+#SBATCH --time=6:00:00
+#SBATCH --output=experiments/table3_trec_repro/logs/%x-%j.out
+#SBATCH --error=experiments/table3_trec_repro/logs/%x-%j.err
+#SBATCH --chdir=.
+
+# =============================================================================
+# Re-decode TREC DL19 / DL20 at m=64, k=100 into a fresh, dedicated,
+# non-colliding output root to independently verify the headline
+# reproduced Table 3 row (NDCG@10, Recall@10).
+#
+# Mirrors scripts/table3_mk_dev_sweep.sh (m=64, k=100 cell) exactly, but
+# for TREC DL19/DL20 query sets instead of Dev, and writes ONLY under
+# REPRO_TABLE3_VERIFIED_2026-07-07/ so it cannot collide with or overwrite
+# any existing run (this is what caused the earlier all_lex_rets/ mixup:
+# an ablation job reused the same output path as the original RQ1 run).
+# =============================================================================
+
+set -euo pipefail
+
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate pag-env
+
+LOG_DIR=experiments/table3_trec_repro/logs
+mkdir -p "$LOG_DIR"
+
+model_dir="./data/experiments-full-lexical-ripor/lexical_ripor_direct_lng_knp_seq2seq_1"
+pretrained_path="$model_dir/checkpoint/"
+
+smt_data_dir="./data/experiments-full-lexical-ripor/t5-full-dense-1-5e-4-12l"
+smt_docid_to_smtid_path="$smt_data_dir/aq_smtid/docid_to_tokenids.json"
+
+lex_base_dir="./data/experiments-splade/t5-splade-0-12l"
+lex_docid_to_smtid_path="$lex_base_dir/top_bow/docid_to_tokenids.json"   # m=64
+
+repro_root="$model_dir/REPRO_TABLE3_VERIFIED_2026-07-07"
+
+# Abort if the dedicated root already exists — never overwrite.
+if [ -e "$repro_root" ]; then
+    echo "ERROR: $repro_root already exists. Refusing to overwrite. Aborting."
+    exit 1
+fi
+mkdir -p "$repro_root"
+
+max_new_token_for_docid=8
+lex_topk=1000
+smt_topk=100
+lexical_constrained=lexical_tmp_rescore
+
+for split in dl19 dl20; do
+    if [ "$split" = "dl19" ]; then
+        q_collection_paths='["./data/msmarco-full/TREC_DL_2019/queries_2019/"]'
+        # Order matters: t5_pretrainer/evaluate.py zips eval_qrel_path against
+        # the hardcoded eval_metric default [[mrr_10,recall], [ndcg_cut], ...],
+        # so qrel_binary.json must come first (-> mrr_10/recall) and the
+        # graded qrel.json second (-> ndcg_cut), or the "binary" assertion
+        # in metrics.py:load_and_evaluate fails.
+        eval_qrel_path='["./data/msmarco-full/TREC_DL_2019/qrel_binary.json","./data/msmarco-full/TREC_DL_2019/qrel.json"]'
+        DS_NAME="TREC_DL_2019"
+    else
+        q_collection_paths='["./data/msmarco-full/TREC_DL_2020/queries_2020/"]'
+        eval_qrel_path='["./data/msmarco-full/TREC_DL_2020/qrel_binary.json","./data/msmarco-full/TREC_DL_2020/qrel.json"]'
+        DS_NAME="TREC_DL_2020"
+    fi
+
+    echo ""
+    echo "============================================================"
+    echo " split = $split ($DS_NAME)"
+    echo "============================================================"
+
+    split_dir="$repro_root/$split"
+    lex_out_dir="$split_dir/lex_ret_${lex_topk}"
+    smt_out_dir="$lex_out_dir/ltmp_smt_ret_${smt_topk}"
+
+    echo "[Stage 1] $split — lexical retrieval (top-$lex_topk)..."
+    python -m t5_pretrainer.evaluate \
+        --pretrained_path="$pretrained_path" \
+        --out_dir="$lex_out_dir" \
+        --lex_out_dir="$lex_out_dir" \
+        --task=lexical_constrained_retrieve_and_rerank \
+        --q_collection_paths="$q_collection_paths" \
+        --batch_size=8 \
+        --topk="$lex_topk" \
+        --lex_docid_to_smtid_path="$lex_docid_to_smtid_path" \
+        --smt_docid_to_smtid_path="$smt_docid_to_smtid_path" \
+        --max_length=128 \
+        --eval_qrel_path="$eval_qrel_path" \
+        2>&1 | tee "$LOG_DIR/stage1_${split}.log"
+
+    echo "[Stage 2] $split — sequential decoding (beam=$smt_topk)..."
+    python -m torch.distributed.launch --nproc_per_node=1 -m t5_pretrainer.evaluate \
+        --pretrained_path="$pretrained_path" \
+        --out_dir="$smt_out_dir" \
+        --lex_out_dir="$lex_out_dir" \
+        --task=lexical_constrained_retrieve_and_rerank_2 \
+        --q_collection_paths="$q_collection_paths" \
+        --batch_size=16 \
+        --topk="$smt_topk" \
+        --lex_docid_to_smtid_path="$lex_docid_to_smtid_path" \
+        --smt_docid_to_smtid_path="$smt_docid_to_smtid_path" \
+        --max_length=128 \
+        --max_new_token_for_docid="$max_new_token_for_docid" \
+        --eval_qrel_path="$eval_qrel_path" \
+        --lex_constrained="$lexical_constrained" \
+        2>&1 | tee "$LOG_DIR/stage2_${split}.log"
+
+    echo "[Stage 3] $split — merging and evaluating..."
+    python -m t5_pretrainer.evaluate \
+        --task=lexical_constrained_retrieve_and_rerank_3 \
+        --out_dir="$smt_out_dir" \
+        --q_collection_paths="$q_collection_paths" \
+        --eval_qrel_path="$eval_qrel_path" \
+        2>&1 | tee "$LOG_DIR/stage3_${split}.log"
+
+    cat > "$split_dir/PROVENANCE.txt" <<EOF
+Generated by: scripts/table3_trec_dl_repro.sh
+SLURM job id: ${SLURM_JOB_ID:-unknown}
+Timestamp:    $(date -Iseconds)
+Split:        $split ($DS_NAME)
+Purpose:      Independent re-decode to verify headline Table 3 row after
+              discovering that the original all_lex_rets/lex_ret_1000/
+              ltmp_smt_ret_100/ output for DL19/DL20 had been silently
+              overwritten by a later ablation job (18991795,
+              "wo_adding_s_simul") that reused the same output path.
+              The original run (job 18980070) printed NDCG@10=0.70336
+              (DL19) / 0.70141 (DL20) to its log
+              (experiments/pag_infer-18980070_RQ1.out) but its run.json
+              no longer exists on disk.
+
+Checkpoint:               $pretrained_path
+lex_docid_to_smtid_path:  $lex_docid_to_smtid_path (m=64)
+smt_docid_to_smtid_path:  $smt_docid_to_smtid_path
+q_collection_paths:       $q_collection_paths
+eval_qrel_path:           $eval_qrel_path
+lex_topk:                 $lex_topk
+smt_topk (beam):          $smt_topk
+max_new_token_for_docid:  $max_new_token_for_docid
+lex_constrained:          $lexical_constrained
+
+Stage 1 (lexical retrieval): task=lexical_constrained_retrieve_and_rerank
+Stage 2 (sequential decoding): task=lexical_constrained_retrieve_and_rerank_2
+Stage 3 (merge + eval):        task=lexical_constrained_retrieve_and_rerank_3
+
+Output run.json: $smt_out_dir/$DS_NAME/run.json
+EOF
+
+done
+
+echo ""
+echo "Done. Outputs under: $repro_root"
