@@ -11,143 +11,135 @@ This repository contains code and experiment pipelines for three evaluation trac
 2. `RQ2`: robustness under query perturbations.
 3. `RQ3`: cross-lingual query shift and mitigation.
 
-## 📌 Correction Notice for RQ2 (read first)
+## Correction to the RQ2 Results
 
 > [!IMPORTANT]
-> **RQ1 (Table 3) is verified and unchanged.** The headline reproduction of
-> PAG on the released checkpoint and identifiers holds:
+> **The RQ2 results reported in Table 6 of the camera-ready paper have been corrected.**
 >
-> | Split | Metric | Value |
-> | --- | --- | --- |
-> | MS MARCO Dev | MRR@10 | **0.386** |
-> | MS MARCO Dev | Recall@10 | **0.671** |
-> | TREC-DL 2019 | NDCG@10 | **0.703** |
-> | TREC-DL 2019 | Recall@10 | **0.265** |
-> | TREC-DL 2020 | NDCG@10 | **0.701** |
-> | TREC-DL 2020 | Recall@10 | **0.236** |
+> The original RQ2 experiments did not use the same decoding and evaluation path as the verified Table 3 reproduction. Consequently, the clean baselines in Table 6 were lower than the corresponding Table 3 results.
 >
-> Every run.json behind these six values was independently re-scored with
-> `pytrec_eval` against the released qrels.
-
-> [!WARNING]
-> **RQ2 (Table 6) is corrected.** The camera-ready RQ2 numbers used a
-> decoding/evaluation path that was not the same path as the verified Table 3
-> reproduction, and its clean baselines came out lower as a result, a
-> difference of this size (≈0.03 NDCG@10 on DL19/DL20, and a comparable gap on
-> Dev) is consistent with a decoding-path difference, not a metric-definition
-> change; a metric fix alone cannot move a clean baseline by that much. The
-> fix was to **re-decode every RQ2 condition (clean and perturbed) through the
-> exact Table 3 pipeline** same checkpoint, same lexical/semantic identifier
-> files, same `--topk`, `--max_new_token_for_docid`, `--lex_constrained`, same
-> two-stage constrained decoding — so that clean and perturbed runs are
-> directly comparable. Every Δ in the tables below is computed **within that
-> matched run**: `Δ = clean − perturbed`, using the clean baseline from the
-> same re-decode, not a value copied from elsewhere.
+> To correct this inconsistency, we re-decoded every RQ2 condition—both clean and perturbed—using the exact Table 3 pipeline:
+>
+> * the same model checkpoint;
+> * the same lexical and semantic identifier files;
+> * the same `--topk` and `--max_new_token_for_docid` settings;
+> * the same `--lex_constrained` configuration; and
+> * the same two-stage constrained-decoding procedure.
+>
+> All reported differences are calculated as
+>
+> `Δ = clean − perturbed`
+>
+> using the clean baseline produced by the corrected pipeline for the corresponding evaluation split. No clean value is copied from a different experiment or configuration.
 
 > [!NOTE]
-> **The paper's findings and conclusions are unchanged.** PAG remains brittle
-> to surface-form and semantic query perturbation: misspelling, synonym
-> replacement, and paraphrasing all cause large retrieval-quality drops, while
-> word reordering is small or near-neutral. What changes is the numerical
-> table, not the interpretation. 🚧 **The corrected RQ2 numbers in this
-> README have not yet been ported to the arXiv version of the paper, and will
-> be reflected in a future arXiv revision.**
+> **The correction does not change the findings or conclusions of the paper.**
+>
+> PAG remains sensitive to changes in query wording. Misspellings, synonym replacement, and paraphrasing consistently produce substantial retrieval-quality degradation, whereas word reordering and naturality normalization have considerably smaller effects.
+>
+> The corrected values below have not yet been incorporated into the arXiv version of the paper. They will be included in a future revision.
 
-> [!CAUTION]
-> **Status: complete.** All three splits (MS MARCO Dev, TREC-DL 2019,
-> TREC-DL 2020), all five query perturbations (misspelling, reordering,
-> synonym, paraphrase, naturality), all five seeds (`1999`, `5`, `27`, `2016`,
-> `2026`) have been re-decoded and re-scored: 75 perturbation conditions
-> across three splits (3 splits × 5 perturbations × 5 seeds), plus the three
-> clean baselines (**78 runs total**). Each split's clean re-decode
-> reproduces its Table 3 headline value within normal
-> run-to-run decoding noise (see below).
+### Correction scope
+
+The corrected evaluation covers:
+
+* three evaluation splits: MS MARCO Dev, TREC-DL 2019, and TREC-DL 2020;
+* five query variations: misspelling, reordering, synonym replacement, paraphrasing, and naturality;
+* five perturbation seeds: `1999`, `5`, `27`, `2016`, and `2026`.
+
+In total, we re-decoded and re-evaluated:
+
+* 75 perturbed runs: 3 splits × 5 variations × 5 seeds; and
+* 3 clean runs, one for each split.
+
+This gives **78 runs in total**. The corrected clean results reproduce the Table 3 headline values within the small variation observed across repeated constrained-decoding runs.
+
+---
 
 ## Corrected RQ2 Results
 
-The tables report mean ± std over five seeds unless noted; Δ = `clean −
-perturbed`, computed within the same re-decoded run. Metrics follow the
-upstream PAG convention: a stable descending-score sort of the run before
-truncating to the top 10, NDCG@10 computed on the graded qrels, and Recall@10
-computed on the released binary qrels. 
-<!-- The binary-qrel relevance threshold is
-per split, matching the released `qrel_binary.json` files exactly as
-distributed in upstream PAG's data package: **TREC-DL 2019's file treats
-relevance grade ≥ 2 as relevant (values are `{0, 2, 3}`); TREC-DL 2020's file
-treats relevance grade ≥ 1 as relevant (values are `{0, 1}`).** Do not assume
-a shared threshold across DL19 and DL20 — the two files use different binary
-cutoffs, verified by inspecting `data/msmarco-full/TREC_DL_{2019,2020}/qrel_binary.json`
-directly. -->
+Unless otherwise stated, the tables report the mean and standard deviation over five perturbation seeds.
+
+For each split:
+
+`Δ = corrected clean score − mean perturbed score`
+
+Before evaluation, each run is stably sorted by descending retrieval score and truncated to the top 10 results. NDCG@10 is computed using the released graded qrels, while Recall@10 and MRR@10 use the released binary qrels.
+
+<!-- ### Note on the TREC-DL 2020 binary qrels
 
 > [!NOTE]
-> NIST's own TREC-DL documentation specifies grade ≥ 2 as relevant for
-> **passage** ranking in both 2019 and 2020 (grade 1, "Related", is
-> explicitly not relevant for passages; grade ≥ 1 is the **document**-ranking
-> threshold). TREC-DL 2020's released `qrel_binary.json` in this data
-> package uses `{0, 1}`, matching the document-ranking threshold rather than
-> the passage-ranking one PAG evaluates on. This file is used **exactly as
-> distributed in upstream PAG's data package** (`data/` in this repository is
-> a verbatim copy of upstream's released Google Drive package) — it is not
-> altered, regenerated, or introduced by this reproduction. We report
-> Recall@10 and MRR@10 on DL20 using this file as-is for comparability with
-> upstream's own numbers, and flag the threshold choice here rather than
-> silently resolving it.
+> NIST defines passage-level relevance for TREC-DL 2019 and 2020 using grades of at least 2. Grade 1, labelled *Related*, is not considered relevant for passage retrieval; the grade-at-least-1 threshold applies to document retrieval.
+>
+> However, the `qrel_binary.json` file distributed with the upstream PAG data package for TREC-DL 2020 contains binary values corresponding to a grade-at-least-1 threshold. This repository contains an unmodified copy of the upstream data package.
+>
+> For direct comparability with the original PAG results, we therefore compute TREC-DL 2020 Recall@10 and MRR@10 using the distributed file as provided. We document the discrepancy here rather than silently modifying or regenerating the qrels. -->
+
+### Note on decoding variability
 
 > [!NOTE]
-> Constrained beam decoding in this pipeline is **not seeded**: per-query
-> rankings can vary slightly from run to run even with identical inputs and
-> config, though aggregate metrics are stable to within a few thousandths.
-> This is why every Δ below is computed within one matched (clean, perturbed)
-> pair from the same re-decode, rather than against a clean value from a
-> different run.
+> The constrained beam-search implementation used by this pipeline does not expose a decoding seed. As a result, repeated runs with identical inputs and settings may produce small differences in individual query rankings. Aggregate scores are generally stable within a few thousandths.
+>
+> For this reason, all differences below use the clean score produced by the same corrected pipeline and configuration, rather than the clean score from the original Table 6 experiments.
 
-### TREC-DL 2019 — clean: NDCG@10 = 0.7003, Recall@10 = 0.2650
+---
 
-| Variation    | NDCG@10 (mean ± std) | Δ vs clean       | Recall@10 (mean ± std) |
-| ------------ | --------------------- | ---------------- | ----------------------- |
-| Misspelling  | 0.5067 ± 0.0245       | 0.1937            | 0.1897 ± 0.0130         |
-| Reordering   | 0.7013 ± 0.0057       | −0.0010 (≈ none) | 0.2683 ± 0.0050         |
-| Synonym      | 0.5745 ± 0.0316       | 0.1258            | 0.2049 ± 0.0145         |
-| Paraphrase   | 0.6374 ± 0.0215       | 0.0630            | 0.2475 ± 0.0046         |
-| Naturality\* | 0.6756 ± 0.0000       | 0.0247            | 0.2592 ± 0.0000         |
+### TREC-DL 2019
 
-### TREC-DL 2020 — clean: NDCG@10 = 0.7021, Recall@10 = 0.2370
+**Corrected clean baseline:** NDCG@10 = **0.7003**, Recall@10 = **0.2650**
 
-| Variation    | NDCG@10 (mean ± std) | Δ vs clean | Recall@10 (mean ± std) |
-| ------------ | --------------------- | ---------- | ----------------------- |
-| Misspelling  | 0.5196 ± 0.0170       | 0.1825     | 0.1663 ± 0.0157         |
-| Reordering   | 0.6809 ± 0.0104       | 0.0212     | 0.2199 ± 0.0101         |
-| Synonym      | 0.5592 ± 0.0218       | 0.1430     | 0.1894 ± 0.0098         |
-| Paraphrase   | 0.5881 ± 0.0233       | 0.1140     | 0.2079 ± 0.0048         |
-| Naturality\* | 0.6789 ± 0.0000       | 0.0232     | 0.2262 ± 0.0000         |
+| Query variation           | NDCG@10, mean ± std |          Δ vs. clean | Recall@10, mean ± std |
+| ------------------------- | ------------------: | -------------------: | --------------------: |
+| Misspelling               |     0.5067 ± 0.0245 |               0.1937 |       0.1897 ± 0.0130 |
+| Reordering                |     0.7013 ± 0.0057 | −0.0010 (negligible) |       0.2683 ± 0.0050 |
+| Synonym replacement       |     0.5745 ± 0.0316 |               0.1258 |       0.2049 ± 0.0145 |
+| Paraphrasing              |     0.6374 ± 0.0215 |               0.0630 |       0.2475 ± 0.0046 |
+| Naturality normalization* |     0.6756 ± 0.0000 |               0.0247 |       0.2592 ± 0.0000 |
 
-### MS MARCO Dev — clean: MRR@10 = 0.3856, Recall@10 = 0.6706
+---
 
-| Variation    | MRR@10 (mean ± std) | Δ vs clean | Recall@10 (mean ± std) |
-| ------------ | -------------------- | ---------- | ----------------------- |
-| Misspelling  | 0.2456 ± 0.0016      | 0.1400     | 0.4528 ± 0.0021         |
-| Reordering   | 0.3771 ± 0.0005      | 0.0085     | 0.6582 ± 0.0015         |
-| Synonym      | 0.2888 ± 0.0021      | 0.0968     | 0.5210 ± 0.0036         |
-| Paraphrase   | 0.3190 ± 0.0028      | 0.0666     | 0.5688 ± 0.0041         |
-| Naturality\* | 0.3660 ± 0.0000      | 0.0196     | 0.6438 ± 0.0000         |
+### TREC-DL 2020
 
-> \*Naturality has zero seed variance because the released naturality
-> perturbation file is identical across all five seeds — it is a deterministic
-> style normalization, not a randomized attack like misspelling, synonym, or
-> paraphrase. This was verified against the source perturbation files and is
-> not a scoring artifact.
+**Corrected clean baseline:** NDCG@10 = **0.7021**, Recall@10 = **0.2370**
 
-The camera-ready reported Dev clean MRR@10 = 0.362 on the buggy path; the
-corrected value is 0.386, consistent with the Table 3 headline reproduction
-above.
+| Query variation           | NDCG@10, mean ± std | Δ vs. clean | Recall@10, mean ± std |
+| ------------------------- | ------------------: | ----------: | --------------------: |
+| Misspelling               |     0.5196 ± 0.0170 |      0.1825 |       0.1663 ± 0.0157 |
+| Reordering                |     0.6809 ± 0.0104 |      0.0212 |       0.2199 ± 0.0101 |
+| Synonym replacement       |     0.5592 ± 0.0218 |      0.1430 |       0.1894 ± 0.0098 |
+| Paraphrasing              |     0.5881 ± 0.0233 |      0.1140 |       0.2079 ± 0.0048 |
+| Naturality normalization* |     0.6789 ± 0.0000 |      0.0232 |       0.2262 ± 0.0000 |
 
-**Takeaway:** the corrected numbers support the same RQ2 finding as the
-camera-ready draft. PAG is most sensitive to misspellings, synonym
-replacement, and paraphrasing, and substantially more robust to word
-reordering — on every split, reordering's Δ is at least an order of magnitude
-smaller than the other four perturbations. The camera-ready numerical table
-should be replaced by the tables above; the planner-brittleness conclusion is
-unchanged.
+---
+
+### MS MARCO Dev
+
+**Corrected clean baseline:** MRR@10 = **0.3856**, Recall@10 = **0.6706**
+
+| Query variation           | MRR@10, mean ± std | Δ vs. clean | Recall@10, mean ± std |
+| ------------------------- | -----------------: | ----------: | --------------------: |
+| Misspelling               |    0.2456 ± 0.0016 |      0.1400 |       0.4528 ± 0.0021 |
+| Reordering                |    0.3771 ± 0.0005 |      0.0085 |       0.6582 ± 0.0015 |
+| Synonym replacement       |    0.2888 ± 0.0021 |      0.0968 |       0.5210 ± 0.0036 |
+| Paraphrasing              |    0.3190 ± 0.0028 |      0.0666 |       0.5688 ± 0.0041 |
+| Naturality normalization* |    0.3660 ± 0.0000 |      0.0196 |       0.6438 ± 0.0000 |
+
+* The released naturality perturbation is identical across the five seed directories. It is a deterministic style-normalization transformation rather than a randomized perturbation. Consequently, the five evaluations produced identical aggregate scores in these experiments, resulting in zero measured seed variance.
+
+---
+
+## Summary of the Correction
+
+The camera-ready RQ2 experiments reported a clean MS MARCO Dev MRR@10 of **0.362**. After running RQ2 through the verified Table 3 pipeline, the corrected clean score is **0.386**, consistent with the headline reproduction result.
+
+The corrected results support the same overall conclusion as the camera-ready paper:
+
+* misspellings cause the largest degradation across all three splits;
+* synonym replacement and paraphrasing also produce substantial losses;
+* word reordering has little or no effect on TREC-DL 2019, a small but consistent effect on MS MARCO Dev, and a modest effect on TREC-DL 2020, comparable in size to naturality normalization on that split; and
+* naturality normalization produces relatively small degradation.
+
+The numerical values in the camera-ready RQ2 table should therefore be replaced by the corrected results above. The interpretation of the experiment and the paper’s conclusion regarding PAG’s sensitivity to query variation remain unchanged.
 
 ## Repository Layout
 
