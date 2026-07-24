@@ -2,6 +2,7 @@
 [![Submission](https://img.shields.io/badge/submission-298-informational)](#)
 [![License](https://img.shields.io/badge/license-Apache%202.0-lightgrey)](LICENSE)
 [![Paper](https://img.shields.io/badge/paper-arXiv-red)](https://arxiv.org/abs/2604.23396)
+[![Paper](https://img.shields.io/badge/paper-ACM-red)](https://dl.acm.org/doi/10.1145/3805712.3808567)
 
 # Lost in Decoding? Reproducing and Stress-Testing the Look-Ahead Prior in Generative Retrieval
 
